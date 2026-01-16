@@ -97,6 +97,23 @@ function generatePaidKey() {
   return `EXHUBPAID-${segment}`;
 }
 
+// Normalisasi tipe key yang tersimpan di API
+function normalizeKeyType(raw) {
+  if (!raw) return '';
+  const t = String(raw).trim().toLowerCase();
+
+  if (['month', 'monthly', 'sebulan', '1bulan', '30d', '30days'].includes(t)) {
+    return 'month';
+  }
+
+  if (['lifetime', 'life', 'selamanya', 'permanent', 'permanentkey'].includes(t)) {
+    return 'lifetime';
+  }
+
+  // kalau tipe lain / custom, kembalikan apa adanya (lowercase)
+  return t;
+}
+
 function getTicketOwnerId(channel) {
   if (!channel) return null;
 
@@ -1241,10 +1258,30 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // Di titik ini: key ada, belum expired, belum deleted, valid=false
+          // CEK TIPE KEY: HARUS 'month'
+          const keyType = normalizeKeyType(info.type || '');
+          if (!keyType) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
+            });
+            return;
+          }
+
+          if (keyType !== 'month') {
+            await interaction.editReply({
+              content:
+                '❌ Key ini **bukan** tipe **Key Sebulan**.\n' +
+                'Jika ini key lifetime, gunakan perintah `/redeemkeylifetime`.\n' +
+                'Jika merasa ada kesalahan, silakan hubungi admin.',
+            });
+            return;
+          }
+
+          // Di titik ini: key ada, belum expired, belum deleted, valid=false, tipe=month
           // -> anggap redeem pertama, update ke valid:true
           try {
-            await createPaidKeyOnAPI(key, info.type || 'month', null, {
+            await createPaidKeyOnAPI(key, keyType, null, {
               valid: true,
               deleted: false,
               createdAt: info.createdAt,
@@ -1327,9 +1364,29 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
+          // CEK TIPE KEY: HARUS 'lifetime'
+          const keyType = normalizeKeyType(info.type || '');
+          if (!keyType) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
+            });
+            return;
+          }
+
+          if (keyType !== 'lifetime') {
+            await interaction.editReply({
+              content:
+                '❌ Key ini **bukan** tipe **Key Lifetime**.\n' +
+                'Jika ini key sebulan, gunakan perintah `/redeemkeysebulan`.\n' +
+                'Jika merasa ada kesalahan, silakan hubungi admin.',
+            });
+            return;
+          }
+
           // Redeem pertama -> set valid:true di API
           try {
-            await createPaidKeyOnAPI(key, info.type || 'lifetime', null, {
+            await createPaidKeyOnAPI(key, keyType, null, {
               valid: true,
               deleted: false,
               createdAt: info.createdAt,
