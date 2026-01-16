@@ -63,6 +63,11 @@ const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
   'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
+// endpoint untuk ambil semua key milik user (dipakai /mykey)
+const EXHUB_USERINFO_URL =
+  process.env.EXHUB_USERINFO_URL ||
+  'https://exc-webs.vercel.app/api/bot/user-info';
+
 // background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord / website sendiri)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 
@@ -220,6 +225,132 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
       `Create/Update key API error ${res.status}: ${text.slice(0, 200)}`
     );
   }
+}
+
+// helper konversi ke ms (aman untuk number/string/null)
+function toMs(value) {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === 'number' ? value : parseInt(value, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+// Ambil semua paid key milik user dari API utama (dipakai /mykey)
+async function fetchUserPaidKeys(discordId, discordTag) {
+  if (!EXHUB_USERINFO_URL) {
+    throw new Error('EXHUB_USERINFO_URL belum dikonfigurasi.');
+  }
+
+  const payload = {
+    discordId: String(discordId),
+    discordTag: discordTag || null,
+  };
+
+  const res = await fetch(EXHUB_USERINFO_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `User-info API error ${res.status}: ${text.slice(0, 200)}`
+    );
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    throw new Error('User-info API mengembalikan JSON yang tidak valid.');
+  }
+
+  const now = Date.now();
+  const rawKeys = Array.isArray(data.keys) ? data.keys : [];
+  const paidKeys = [];
+
+  for (const k of rawKeys) {
+    if (!k) continue;
+
+    const providerRaw = String(k.provider || k.source || '').toLowerCase();
+    const tierRaw = k.tier || k.type || (k.info && (k.info.tier || k.info.type)) || '';
+    const typeNorm = normalizeKeyType(tierRaw);
+
+    // filter free key dari Work.ink / Linkvertise / tier free
+    const isFree =
+      typeNorm === 'free' ||
+      providerRaw === 'work.ink' ||
+      providerRaw === 'workink' ||
+      providerRaw.includes('linkvertise') ||
+      k.free === true;
+
+    if (isFree) continue;
+
+    let token =
+      k.token ||
+      k.key ||
+      k.keyToken ||
+      (k.info && (k.info.token || k.info.key)) ||
+      null;
+
+    if (!token) continue;
+
+    const ownerDiscordId =
+      k.ownerDiscordId ||
+      (k.info && k.info.ownerDiscordId) ||
+      null;
+
+    if (ownerDiscordId && String(ownerDiscordId) !== String(discordId)) {
+      // key dimiliki user lain
+      continue;
+    }
+
+    const createdAtMs =
+      toMs(k.createdAt) ||
+      (k.info ? toMs(k.info.createdAt) : null);
+
+    const expiresAfterMs =
+      toMs(k.expiresAfter) ||
+      toMs(k.expiresAtMs) ||
+      toMs(k.expiresAt) ||
+      (k.info ? toMs(k.info.expiresAfter) : null);
+
+    const deleted = !!(k.deleted || (k.info && k.info.deleted));
+    const valid =
+      typeof k.valid === 'boolean'
+        ? k.valid
+        : k.info && typeof k.info.valid === 'boolean'
+        ? k.info.valid
+        : true;
+
+    const expired =
+      expiresAfterMs && typeof expiresAfterMs === 'number'
+        ? now > expiresAfterMs
+        : false;
+
+    let status;
+    if (deleted) status = 'Deleted';
+    else if (expired) status = 'Expired';
+    else if (!valid) status = 'Not Redeemed';
+    else status = 'Active';
+
+    paidKeys.push({
+      token: String(token),
+      type: typeNorm || 'paid',
+      createdAtMs,
+      expiresAfterMs,
+      status,
+    });
+  }
+
+  // sort berdasarkan tanggal order (createdAt) dari lama -> baru
+  paidKeys.sort((a, b) => {
+    const ca = a.createdAtMs || 0;
+    const cb = b.createdAtMs || 0;
+    return ca - cb;
+  });
+
+  return paidKeys;
 }
 
 // lookup username Roblox -> { id, name, displayName }
@@ -717,6 +848,93 @@ client.on('interactionCreate', async (interaction) => {
           content: `Reaction role dibuat di ${targetChannel}.`,
           ephemeral: true,
         });
+      }
+
+      // /mykey dan /checkmykey
+      else if (commandName === 'mykey' || commandName === 'checkmykey') {
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+          const userId = interaction.user.id;
+          const userTag = `${interaction.user.username}#${interaction.user.discriminator ?? '0'}`;
+
+          const keys = await fetchUserPaidKeys(userId, userTag);
+
+          if (!keys || keys.length === 0) {
+            await interaction.editReply({
+              content:
+                'Saat ini tidak ada paid key yang tercatat atas akun Discord kamu. Jika merasa sudah pernah order, hubungi admin dengan menyertakan bukti pembayaran.',
+            });
+            return;
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle('🔑 Key Information — Akun Kamu')
+            .setDescription(
+              'Berikut seluruh **paid key** yang terikat ke akun Discord kamu berdasarkan data di API ExHub.'
+            )
+            .setColor(0x5865f2);
+
+          const maxShow = 10; // batasi supaya embed tidak overload
+          const slice = keys.slice(0, maxShow);
+
+          slice.forEach((k, idx) => {
+            const createdTs = k.createdAtMs
+              ? Math.floor(k.createdAtMs / 1000)
+              : null;
+            const expireTs = k.expiresAfterMs
+              ? Math.floor(k.expiresAfterMs / 1000)
+              : null;
+
+            let paidLabel;
+            if (k.type === 'month') paidLabel = 'Month (Sebulan)';
+            else if (k.type === 'lifetime') paidLabel = 'Lifetime';
+            else if (k.type) paidLabel = k.type;
+            else paidLabel = 'Paid';
+
+            const lines = [];
+            lines.push(`**Your Key:** \`${k.token}\``);
+
+            if (createdTs) {
+              lines.push(
+                `**Order Key:** <t:${createdTs}:f> • <t:${createdTs}:R>`
+              );
+            } else {
+              lines.push('**Order Key:** -');
+            }
+
+            if (expireTs) {
+              lines.push(
+                `**Expired Date:** <t:${expireTs}:f> • <t:${expireTs}:R>`
+              );
+            } else {
+              lines.push('**Expired Date:** -');
+            }
+
+            lines.push(`**Paid Plan:** ${paidLabel}`);
+            lines.push(`**Status:** ${k.status}`);
+
+            embed.addFields({
+              name: `Key #${idx + 1}`,
+              value: lines.join('\n'),
+              inline: false,
+            });
+          });
+
+          if (keys.length > maxShow) {
+            embed.setFooter({
+              text: `Menampilkan ${maxShow} dari ${keys.length} key. Gunakan dashboard web untuk detail lengkap.`,
+            });
+          }
+
+          await interaction.editReply({ embeds: [embed] });
+        } catch (err) {
+          console.error('/mykey error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat mengambil data key dari API. Coba lagi beberapa saat lagi atau hubungi admin.',
+          });
+        }
       }
 
       return;
@@ -1315,7 +1533,10 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           // CEK PEMILIK KEY: harus sama dengan akun Discord yang redeem
-          if (info.ownerDiscordId && String(info.ownerDiscordId) !== interaction.user.id) {
+          if (
+            info.ownerDiscordId &&
+            String(info.ownerDiscordId) !== interaction.user.id
+          ) {
             await interaction.editReply({
               content:
                 '❌ Key ini terikat ke akun Discord lain.\n' +
@@ -1437,7 +1658,10 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           // CEK PEMILIK KEY
-          if (info.ownerDiscordId && String(info.ownerDiscordId) !== interaction.user.id) {
+          if (
+            info.ownerDiscordId &&
+            String(info.ownerDiscordId) !== interaction.user.id
+          ) {
             await interaction.editReply({
               content:
                 '❌ Key ini terikat ke akun Discord lain.\n' +
@@ -1595,6 +1819,12 @@ const commands = [
         .setDescription('Channel tempat pesan reaction role (optional)')
         .setRequired(false)
     ),
+  new SlashCommandBuilder()
+    .setName('mykey')
+    .setDescription('Lihat semua paid key yang terikat ke akun Discord kamu'),
+  new SlashCommandBuilder()
+    .setName('checkmykey')
+    .setDescription('Alias dari /mykey untuk cek semua paid key kamu'),
 ].map((c) => c.setDMPermission(false).toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
