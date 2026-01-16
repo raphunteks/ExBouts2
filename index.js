@@ -507,8 +507,9 @@ client.on('interactionCreate', async (interaction) => {
 
         const expiresTs = Math.floor((Date.now() + ms) / 1000);
         const msg =
-          `🎟️ Key Sebulan:\n\`${key}\`\nSilahkan redeem key diatas di ${channel}.\n` +
-          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
+          `🎟️ Key Sebulan:\n\`${key}\`\n` +
+          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>\n` +
+          'Silakan redeem key ini menggunakan perintah `/redeemkeysebulan` di server.';
 
         if (target) {
           await target
@@ -524,10 +525,11 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silahkan cek key DM ${target}. Balik ke sini untuk reedem /redeemkeysebulan`,
+              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke sini untuk redeem dengan \`/redeemkeysebulan\`.`,
             });
           }
         } else {
+          // Kalau tidak ada target, tampilkan langsung di reply (ephemeral)
           await interaction.reply({ content: msg, ephemeral: true });
         }
       }
@@ -551,8 +553,9 @@ client.on('interactionCreate', async (interaction) => {
 
         const expiresTs = Math.floor((Date.now() + ms) / 1000);
         const msg =
-          `🎟️ Key Lifetime:\n\`${key}\`\nSilahkan redeem key diatas di ${channel}.\n` +
-          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
+          `🎟️ Key Lifetime:\n\`${key}\`\n` +
+          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>\n` +
+          'Silakan redeem key ini menggunakan perintah `/redeemkeylifetime` di server.';
 
         if (target) {
           await target
@@ -568,7 +571,7 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silahkan cek key DM ${target}. Balik ke sini untuk reedem /redeemkeylifetime`,
+              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke sini untuk redeem dengan \`/redeemkeylifetime\`.`,
             });
           }
         } else {
