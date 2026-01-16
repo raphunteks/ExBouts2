@@ -1,0 +1,1278 @@
+// index.js
+// =====================================================
+//  ExHub Store / Ticket Bot (single file, Railway ready)
+// =====================================================
+
+require('dotenv').config();
+
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  PermissionsBitField,
+  ChannelType,
+  AttachmentBuilder, // kalau nanti mau pakai file, sekarang belum wajib
+} = require('discord.js');
+
+const crypto = require('crypto');
+
+// ---------- ENV & CONFIG ---------------------------------------
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const OWNER_ID = process.env.OWNER_ID;
+
+// kategori untuk ticket (opsional, bisa null)
+const TICKET_CATEGORY_ID =
+  process.env.TICKET_CATEGORY_ID || process.env.CATTEGORY_TICKETCHANNEL_ID || null;
+
+// channel log order (opsional)
+const CHANNEL_LOGORDER_ID = process.env.CHANNEL_LOGORDER_ID || null;
+
+// welcome channel (bisa juga diubah via /setwelcomechannel)
+let welcomeChannelId = process.env.WELCOME_CHANNEL_ID || null;
+
+// URL dasar validasi key (default ke API kamu)
+const PAIDKEY_VALIDATE_BASE =
+  process.env.PAIDKEY_VALIDATE_BASE ||
+  'https://exc-webs.vercel.app/api/paidkey/isValidate';
+
+// endpoint untuk create/simpan key di API (WAJIB kamu set di .env)
+const PAIDKEY_CREATE_URL = process.env.PAIDKEY_CREATE_URL || null;
+
+// background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord)
+const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
+
+// QRIS image URL (gambar PNG/JPG QRIS kamu)
+const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
+
+// harga default (bisa diubah pakai slash command)
+let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
+let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
+let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
+
+// ticketOwners: channelId -> userId
+const ticketOwners = new Map();
+
+// reaction role simpel: messageId -> { emoji, roleId }
+const reactionRoles = new Map();
+
+// ---------- HELPER UTILS ---------------------------------------
+
+function isOwner(userId) {
+  return OWNER_ID && userId === OWNER_ID;
+}
+
+function formatRupiah(num) {
+  if (!num && num !== 0) return '-';
+  return num.toLocaleString('id-ID');
+}
+
+function generatePaidKey() {
+  const segment = crypto.randomBytes(4).toString('hex').toUpperCase();
+  return `EXHUBPAID-${segment}`;
+}
+
+function getTicketOwnerId(channel) {
+  if (!channel) return null;
+
+  if (ticketOwners.has(channel.id)) {
+    return ticketOwners.get(channel.id);
+  }
+
+  const topic = channel.topic || '';
+  const match = topic.match(/OwnerID:(\d{5,})/);
+  return match ? match[1] : null;
+}
+
+// Call API untuk cek key
+async function validatePaidKey(key) {
+  const url = `${PAIDKEY_VALIDATE_BASE.replace(/\/$/, '')}/${encodeURIComponent(
+    key
+  )}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Validate key HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Call API untuk create/simpan key di server ExHub
+async function createPaidKeyOnAPI(key, type, expiresAfterMs) {
+  if (!PAIDKEY_CREATE_URL) {
+    // Kalau belum di-set, lewati saja (bot tetap jalan, tapi tidak kirim ke API)
+    console.warn(
+      '[WARN] PAIDKEY_CREATE_URL belum diisi, key tidak dikirim ke API.'
+    );
+    return;
+  }
+
+  const createdAt = Date.now();
+  const payload = {
+    valid: false,
+    deleted: false,
+    expired: false,
+    info: {
+      token: key,
+      createdAt,
+      byIp: 'discord-bot', // bisa kamu ganti/isi sesuai design backend
+      expiresAfter: createdAt + expiresAfterMs,
+      type,
+    },
+  };
+
+  const res = await fetch(PAIDKEY_CREATE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `Create key API error ${res.status}: ${text.slice(0, 200)}`
+    );
+  }
+}
+
+// lookup username Roblox -> { id, name, displayName }
+async function lookupRobloxUser(username) {
+  const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      usernames: [username],
+      excludeBannedUsers: true,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Roblox API error ${res.status}`);
+  }
+
+  const json = await res.json();
+  if (!json || !Array.isArray(json.data) || json.data.length === 0) {
+    return null;
+  }
+
+  const u = json.data[0];
+  return {
+    id: u.id,
+    name: u.name,
+    displayName: u.displayName,
+  };
+}
+
+function robloxAvatarUrl(userId) {
+  return `https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=150&height=150&format=png`;
+}
+
+async function logOrder(guild, embed) {
+  if (!CHANNEL_LOGORDER_ID) return;
+  try {
+    const ch = guild.channels.cache.get(CHANNEL_LOGORDER_ID);
+    if (!ch) return;
+    await ch.send({ embeds: [embed] });
+  } catch (err) {
+    console.error('Failed to send log order:', err);
+  }
+}
+
+// ---------- DISCORD CLIENT -------------------------------------
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+  ],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember],
+});
+
+client.once('ready', () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+// Welcome message
+client.on('guildMemberAdd', async (member) => {
+  try {
+    const channelId = welcomeChannelId;
+    if (!channelId) return;
+
+    const ch = member.guild.channels.cache.get(channelId);
+    if (!ch) return;
+
+    const emb = new EmbedBuilder()
+      .setTitle('👋 Selamat Datang!')
+      .setDescription(
+        `Halo ${member}, selamat datang di **${member.guild.name}**!\n\n` +
+          'Pastikan baca rules & pilih role yang sesuai sebelum mulai chat.'
+      )
+      .setThumbnail(
+        member.user.displayAvatarURL({ extension: 'png', size: 256 })
+      )
+      .setColor(0x5865f2);
+
+    if (WELCOME_BG_URL) emb.setImage(WELCOME_BG_URL);
+
+    await ch.send({ content: `<@${member.id}>`, embeds: [emb] });
+  } catch (err) {
+    console.error('Error on guildMemberAdd:', err);
+  }
+});
+
+// Reaction role simple
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch();
+
+    const conf = reactionRoles.get(reaction.message.id);
+    if (!conf) return;
+
+    const emojiStr = reaction.emoji.toString();
+    if (emojiStr !== conf.emoji) return;
+
+    const guild = reaction.message.guild;
+    if (!guild) return;
+    const member = await guild.members.fetch(user.id);
+    await member.roles.add(conf.roleId).catch(() => {});
+  } catch (err) {
+    console.error('messageReactionAdd error:', err);
+  }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch();
+
+    const conf = reactionRoles.get(reaction.message.id);
+    if (!conf) return;
+
+    const emojiStr = reaction.emoji.toString();
+    if (emojiStr !== conf.emoji) return;
+
+    const guild = reaction.message.guild;
+    if (!guild) return;
+    const member = await guild.members.fetch(user.id);
+    await member.roles.remove(conf.roleId).catch(() => {});
+  } catch (err) {
+    console.error('messageReactionRemove error:', err);
+  }
+});
+
+// ---------- PANEL & TICKET HELPERS -----------------------------
+
+async function sendStorePanel(channel) {
+  const embed = new EmbedBuilder()
+    .setTitle('🎮 EXHUB STORE - Premium Scripts')
+    .setDescription(
+      'Halo! Selamat datang di **EXHUB STORE** 👋\n\n' +
+        'Kamu lagi cari script Roblox premium? Kamu datang ke tempat yang tepat!\n\n' +
+        '✨ Script oke\n' +
+        '💰 Harga bersahabat di kantong\n' +
+        '⚡ Respon cepat dari admin\n\n' +
+        'Klik tombol **📩 Buat Ticket** di bawah untuk mulai order ya!\n' +
+        'Kami siap bantu kamu 24/7 🙂'
+    )
+    .setColor(0x2b2d31);
+
+  const btn = new ButtonBuilder()
+    .setCustomId('store_create_ticket')
+    .setEmoji('📩')
+    .setLabel('Buat Ticket')
+    .setStyle(ButtonStyle.Primary);
+
+  const row = new ActionRowBuilder().addComponents(btn);
+
+  await channel.send({ embeds: [embed], components: [row] });
+}
+
+async function sendTicketIntroMessage(channel, user) {
+  const desc = [
+    `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
+    '',
+    '**Paket Tersedia**',
+    `⚡ Key Sebulan – Rp ${formatRupiah(priceKeyMonth)} (Akses 5 Script • 30 hari)`,
+    `🔥 Key Lifetime – Rp ${formatRupiah(
+      priceKeyLifetime
+    )} (Akses 5 Script • 1 tahun)`,
+    `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
+      priceIndoHangout
+    )} (1 Username • Permanent)`,
+    '',
+    '**Langkah Selanjutnya**',
+    '1. Pilih paket dari dropdown menu di bawah.',
+    '2. Ikuti instruksi yang muncul.',
+    '3. Upload bukti bayar (screenshot QRIS) di channel ini.',
+    '4. Tunggu admin konfirmasi ✅',
+    '',
+    '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.',
+  ].join('\n');
+
+  const embed = new EmbedBuilder()
+    .setTitle('✨ Ticket VIP Order')
+    .setDescription(desc)
+    .setColor(0xfee75c);
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_select_package')
+    .setPlaceholder('📦 Pilih paket yang Anda inginkan...')
+    .addOptions(
+      {
+        label: 'Key Sebulan',
+        description: `Rp ${formatRupiah(
+          priceKeyMonth
+        )} • 5 Script Premium (30 hari)`,
+        value: 'KEY_MONTH',
+        emoji: '⚡',
+      },
+      {
+        label: 'Key Lifetime',
+        description: `Rp ${formatRupiah(
+          priceKeyLifetime
+        )} • 5 Script Premium (1 tahun)`,
+        value: 'KEY_LIFE',
+        emoji: '🔥',
+      },
+      {
+        label: 'Indo Hangout Premium',
+        description: `Rp ${formatRupiah(
+          priceIndoHangout
+        )} • 1 Username (Permanent)`,
+        value: 'INDO_VIP',
+        emoji: '🇮🇩',
+      }
+    );
+
+  const rowSelect = new ActionRowBuilder().addComponents(select);
+
+  const btnCancel = new ButtonBuilder()
+    .setCustomId('ticket_cancel')
+    .setLabel('Cancel Order')
+    .setEmoji('❌')
+    .setStyle(ButtonStyle.Secondary);
+
+  const btnClose = new ButtonBuilder()
+    .setCustomId('ticket_close')
+    .setLabel('Close Ticket')
+    .setEmoji('🔒')
+    .setStyle(ButtonStyle.Danger);
+
+  const rowButtons = new ActionRowBuilder().addComponents(btnCancel, btnClose);
+
+  await channel.send({
+    content: `<@${user.id}>`,
+    embeds: [embed],
+    components: [rowSelect, rowButtons],
+  });
+}
+
+// ---------- INTERACTION HANDLER --------------------------------
+
+client.on('interactionCreate', async (interaction) => {
+  try {
+    // ===================== SLASH COMMAND =======================
+    if (interaction.isChatInputCommand()) {
+      const { commandName } = interaction;
+
+      // Owner only helper
+      const ensureOwner = async () => {
+        if (!isOwner(interaction.user.id)) {
+          await interaction.reply({
+            content: 'Perintah ini hanya bisa digunakan oleh OWNER bot.',
+            ephemeral: true,
+          });
+          return false;
+        }
+        return true;
+      };
+
+      // /sendticketpanel
+      if (commandName === 'sendticketpanel') {
+        if (!(await ensureOwner())) return;
+        await sendStorePanel(interaction.channel);
+        await interaction.reply({
+          content: 'Panel ticket store sudah dikirim di channel ini.',
+          ephemeral: true,
+        });
+      }
+
+      // /setharga_sebulan
+      else if (commandName === 'setharga_sebulan') {
+        if (!(await ensureOwner())) return;
+        const harga = interaction.options.getInteger('harga', true);
+        priceKeyMonth = harga;
+        await interaction.reply({
+          content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
+          ephemeral: true,
+        });
+      }
+
+      // /setharga_lifetime
+      else if (commandName === 'setharga_lifetime') {
+        if (!(await ensureOwner())) return;
+        const harga = interaction.options.getInteger('harga', true);
+        priceKeyLifetime = harga;
+        await interaction.reply({
+          content: `Harga **Key Lifetime** di-set ke Rp ${formatRupiah(
+            harga
+          )}.`,
+          ephemeral: true,
+        });
+      }
+
+      // /setharga_indohangout
+      else if (commandName === 'setharga_indohangout') {
+        if (!(await ensureOwner())) return;
+        const harga = interaction.options.getInteger('harga', true);
+        priceIndoHangout = harga;
+        await interaction.reply({
+          content: `Harga **Indo Hangout Premium** di-set ke Rp ${formatRupiah(
+            harga
+          )}.`,
+          ephemeral: true,
+        });
+      }
+
+      // /generatekeysebulan
+      else if (commandName === 'generatekeysebulan') {
+        if (!(await ensureOwner())) return;
+        const target = interaction.options.getUser('member', false);
+        const key = generatePaidKey();
+        const days = 30;
+        const ms = days * 24 * 60 * 60 * 1000;
+
+        // kirim ke API (opsional, tergantung PAIDKEY_CREATE_URL)
+        try {
+          await createPaidKeyOnAPI(key, 'month', ms);
+        } catch (err) {
+          console.error('createPaidKeyOnAPI (month) error:', err);
+        }
+
+        const expiresTs = Math.floor((Date.now() + ms) / 1000);
+        const msg =
+          `🎟️ Key Sebulan:\n\`${key}\`\n` +
+          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
+
+        if (target) {
+          await target
+            .send({ content: msg })
+            .catch(() => console.warn('Failed to DM user key.'));
+          await interaction.reply({
+            content: `Key sebulan dikirim ke DM ${target}.`,
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({ content: msg, ephemeral: true });
+        }
+      }
+
+      // /generatekeylifetime
+      else if (commandName === 'generatekeylifetime') {
+        if (!(await ensureOwner())) return;
+        const target = interaction.options.getUser('member', false);
+        const key = generatePaidKey();
+        const days = 365;
+        const ms = days * 24 * 60 * 60 * 1000;
+
+        try {
+          await createPaidKeyOnAPI(key, 'lifetime', ms);
+        } catch (err) {
+          console.error('createPaidKeyOnAPI (lifetime) error:', err);
+        }
+
+        const expiresTs = Math.floor((Date.now() + ms) / 1000);
+        const msg =
+          `🎟️ Key Lifetime:\n\`${key}\`\n` +
+          `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
+
+        if (target) {
+          await target
+            .send({ content: msg })
+            .catch(() => console.warn('Failed to DM user key.'));
+          await interaction.reply({
+            content: `Key lifetime dikirim ke DM ${target}.`,
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({ content: msg, ephemeral: true });
+        }
+      }
+
+      // /redeemkeysebulan
+      else if (commandName === 'redeemkeysebulan') {
+        const modal = new ModalBuilder()
+          .setCustomId('modal_redeem_key_month')
+          .setTitle('Redeem Key Sebulan');
+
+        const input = new TextInputBuilder()
+          .setCustomId('field_key_month')
+          .setLabel('Masukkan Key Sebulan')
+          .setPlaceholder('EXHUBPAID-XXXX')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+        await interaction.showModal(modal);
+      }
+
+      // /redeemkeylifetime
+      else if (commandName === 'redeemkeylifetime') {
+        const modal = new ModalBuilder()
+          .setCustomId('modal_redeem_key_life')
+          .setTitle('Redeem Key Lifetime');
+
+        const input = new TextInputBuilder()
+          .setCustomId('field_key_life')
+          .setLabel('Masukkan Key Lifetime')
+          .setPlaceholder('EXHUBPAID-XXXX')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+        await interaction.showModal(modal);
+      }
+
+      // /setwelcomechannel
+      else if (commandName === 'setwelcomechannel') {
+        if (!(await ensureOwner())) return;
+        const ch = interaction.options.getChannel('channel', true);
+        welcomeChannelId = ch.id;
+        await interaction.reply({
+          content: `Welcome channel di-set ke ${ch}.`,
+          ephemeral: true,
+        });
+      }
+
+      // /sendreactionrole
+      else if (commandName === 'sendreactionrole') {
+        if (!(await ensureOwner())) return;
+        const role = interaction.options.getRole('role', true);
+        const emoji = interaction.options.getString('emoji', true);
+        const targetChannel =
+          interaction.options.getChannel('channel', false) ||
+          interaction.channel;
+
+        const msg = await targetChannel.send(
+          `React dengan ${emoji} untuk mendapatkan role ${role}.`
+        );
+
+        try {
+          await msg.react(emoji);
+        } catch (err) {
+          console.error('Gagal menambahkan reaction pada pesan:', err);
+        }
+
+        reactionRoles.set(msg.id, { emoji, roleId: role.id });
+
+        await interaction.reply({
+          content: `Reaction role dibuat di ${targetChannel}.`,
+          ephemeral: true,
+        });
+      }
+
+      return;
+    }
+
+    // ===================== BUTTONS ==============================
+    if (interaction.isButton()) {
+      const { customId } = interaction;
+
+      // create ticket
+      if (customId === 'store_create_ticket') {
+        if (!interaction.guild) {
+          await interaction.reply({
+            content: 'Perintah ini hanya dapat digunakan di server.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const guild = interaction.guild;
+        const cleanName =
+          interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '') ||
+          'user';
+        const shortId = Math.floor(Math.random() * 9000) + 1000;
+        const channelName = `ticket-${cleanName}-${shortId}`;
+
+        const everyone = guild.roles.everyone;
+
+        const permissionOverwrites = [
+          {
+            id: everyone.id,
+            deny: [PermissionsBitField.Flags.ViewChannel],
+          },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.AttachFiles,
+            ],
+          },
+          {
+            id: guild.members.me.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ManageChannels,
+            ],
+          },
+        ];
+
+        if (OWNER_ID) {
+          permissionOverwrites.push({
+            id: OWNER_ID,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ManageChannels,
+            ],
+          });
+        }
+
+        const channel = await guild.channels.create({
+          name: channelName.slice(0, 90),
+          type: ChannelType.GuildText,
+          parent: TICKET_CATEGORY_ID || undefined,
+          topic: `Ticket order by ${interaction.user.tag} | OwnerID:${interaction.user.id}`,
+          permissionOverwrites,
+        });
+
+        ticketOwners.set(channel.id, interaction.user.id);
+
+        await interaction.editReply({
+          content: `Ticket kamu sudah dibuat: ${channel}`,
+        });
+
+        await sendTicketIntroMessage(channel, interaction.user);
+
+        // log
+        const logEmbed = new EmbedBuilder()
+          .setTitle('🎫 Ticket Baru Dibuat')
+          .addFields(
+            { name: 'User', value: `${interaction.user} (${interaction.user.id})` },
+            { name: 'Channel', value: `${channel}` }
+          )
+          .setTimestamp()
+          .setColor(0x5865f2);
+
+        await logOrder(guild, logEmbed);
+        return;
+      }
+
+      // cancel order (user pemilik channel)
+      if (customId === 'ticket_cancel') {
+        const ownerId = getTicketOwnerId(interaction.channel);
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content: 'Hanya pembuat ticket yang bisa membatalkan order ini.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content: 'Ticket akan dihapus dalam 3 detik...',
+          ephemeral: true,
+        });
+
+        setTimeout(() => {
+          interaction.channel
+            .delete('Ticket dibatalkan oleh user')
+            .catch(() => {});
+        }, 3000);
+        return;
+      }
+
+      // close ticket (khusus owner / staff dengan ManageChannels)
+      if (customId === 'ticket_close') {
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        if (
+          !member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya admin / owner yang dapat menutup ticket ini (Close Ticket).',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content: 'Ticket akan ditutup (channel dihapus) dalam 3 detik...',
+          ephemeral: true,
+        });
+
+        setTimeout(() => {
+          interaction.channel
+            .delete('Ticket closed by staff')
+            .catch(() => {});
+        }, 3000);
+        return;
+      }
+
+      // tombol "Input Username Lagi" (gagal / salah)
+      if (customId === 'roblox_reinput' || customId === 'roblox_wrong') {
+        const ownerId = getTicketOwnerId(interaction.channel);
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya pembuat ticket yang dapat menginput ulang username Roblox.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId('modal_roblox_username')
+          .setTitle('Masukkan Username Roblox');
+
+        const input = new TextInputBuilder()
+          .setCustomId('field_roblox_username')
+          .setLabel('Username Roblox')
+          .setPlaceholder('Contoh: BloxGuy123')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+        await interaction.showModal(modal);
+        return;
+      }
+
+      // tombol "Ya, Benar!" confirm username
+      if (customId.startsWith('roblox_confirm_')) {
+        const ownerId = getTicketOwnerId(interaction.channel);
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya pembuat ticket yang dapat mengkonfirmasi username ini.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // disable tombol di message yang sama
+        const embed = interaction.message.embeds[0];
+        let usernameText = '-';
+        let displayNameText = '-';
+        let userIdText = '-';
+
+        if (embed && Array.isArray(embed.fields)) {
+          for (const f of embed.fields) {
+            if (f.name === 'Username') usernameText = f.value;
+            if (f.name === 'Display Name') displayNameText = f.value;
+            if (f.name === 'User ID') userIdText = f.value;
+          }
+        }
+
+        const rowOld = interaction.message.components[0];
+        const btn1 = ButtonBuilder.from(rowOld.components[0]).setDisabled(true);
+        const btn2 = ButtonBuilder.from(rowOld.components[1]).setDisabled(true);
+        const newRow = new ActionRowBuilder().addComponents(btn1, btn2);
+
+        await interaction.update({ components: [newRow] });
+
+        const harga = priceIndoHangout;
+
+        const instruksi = new EmbedBuilder()
+          .setTitle('✨ Instruksi Pembayaran')
+          .setDescription('Scan QRIS di bawah untuk membayar')
+          .addFields(
+            {
+              name: 'Detail Pesanan',
+              value:
+                `Paket   : Indo Hangout Premium\n` +
+                `Username: ${usernameText}\n` +
+                `User ID : ${userIdText}\n` +
+                `Nominal : Rp ${formatRupiah(harga)}`,
+            },
+            {
+              name: 'Langkah Pembayaran',
+              value:
+                '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+                '2. Bayar sesuai nominal.\n' +
+                '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+                '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+            },
+            {
+              name: 'Jam Operasional',
+              value: '08:00 - 23:00 WIB',
+            }
+          )
+          .setColor(0xfee75c);
+
+        if (QRIS_IMAGE_URL) {
+          instruksi.setImage(QRIS_IMAGE_URL);
+        }
+
+        await interaction.followUp({ embeds: [instruksi] });
+
+        const logEmb = new EmbedBuilder()
+          .setTitle('🧾 Order Indo Hangout Premium')
+          .addFields(
+            { name: 'Discord User', value: `${interaction.user} (${interaction.user.id})` },
+            { name: 'Roblox Username', value: usernameText },
+            { name: 'Roblox User ID', value: userIdText },
+            { name: 'Nominal', value: `Rp ${formatRupiah(harga)}` },
+            { name: 'Channel Ticket', value: `${interaction.channel}` }
+          )
+          .setTimestamp()
+          .setColor(0x57f287);
+
+        await logOrder(interaction.guild, logEmb);
+        return;
+      }
+
+      return;
+    }
+
+    // ===================== SELECT MENU ==========================
+    if (interaction.isStringSelectMenu()) {
+      const { customId } = interaction;
+      if (customId === 'ticket_select_package') {
+        const [value] = interaction.values;
+        const ownerId = getTicketOwnerId(interaction.channel);
+
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        if (value === 'KEY_MONTH') {
+          await interaction.reply({
+            content:
+              `Kamu memilih paket **Key Sebulan** (Rp ${formatRupiah(
+                priceKeyMonth
+              )}).\n` +
+              'Silakan lakukan pembayaran sesuai instruksi admin. ' +
+              'Setelah pembayaran diterima, admin akan mengirim key melalui perintah `/generatekeysebulan`.',
+            ephemeral: true,
+          });
+        } else if (value === 'KEY_LIFE') {
+          await interaction.reply({
+            content:
+              `Kamu memilih paket **Key Lifetime** (Rp ${formatRupiah(
+                priceKeyLifetime
+              )}).\n` +
+              'Silakan lakukan pembayaran sesuai instruksi admin. ' +
+              'Setelah pembayaran diterima, admin akan mengirim key melalui perintah `/generatekeylifetime`.',
+            ephemeral: true,
+          });
+        } else if (value === 'INDO_VIP') {
+          const modal = new ModalBuilder()
+            .setCustomId('modal_roblox_username')
+            .setTitle('Masukkan Username Roblox');
+
+          const input = new TextInputBuilder()
+            .setCustomId('field_roblox_username')
+            .setLabel('Username Roblox')
+            .setPlaceholder('Contoh: BloxGuy123')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+          const row = new ActionRowBuilder().addComponents(input);
+          modal.addComponents(row);
+          await interaction.showModal(modal);
+        }
+
+        return;
+      }
+
+      return;
+    }
+
+    // ===================== MODAL SUBMIT =========================
+    if (interaction.isModalSubmit()) {
+      const { customId } = interaction;
+
+      // modal input username Roblox
+      if (customId === 'modal_roblox_username') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const ownerId = getTicketOwnerId(interaction.channel);
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.editReply({
+            content:
+              'Hanya pembuat ticket yang dapat menginput username Roblox.',
+          });
+          return;
+        }
+
+        const username = interaction.fields
+          .getTextInputValue('field_roblox_username')
+          .trim();
+
+        if (!username) {
+          await interaction.editReply({
+            content: 'Username tidak boleh kosong.',
+          });
+          return;
+        }
+
+        try {
+          const roblox = await lookupRobloxUser(username);
+
+          if (!roblox) {
+            await interaction.editReply({
+              content:
+                '❌ Username tidak ditemukan. Lihat panel di bawah untuk panduan dan input ulang.',
+            });
+
+            const embed = new EmbedBuilder()
+              .setTitle('✨ Username Tidak Ditemukan')
+              .setDescription(
+                `Username \`${username}\` tidak ditemukan di Roblox.`
+              )
+              .addFields(
+                {
+                  name: 'Kemungkinan Penyebab',
+                  value:
+                    '• Username salah ketik\n' +
+                    '• Menggunakan Display Name (bukan Username)\n' +
+                    '• Akun Roblox tidak ada\n' +
+                    '• Ada spasi atau karakter khusus',
+                },
+                {
+                  name: 'Cara Cek Username Roblox',
+                  value:
+                    '1. Buka profil Roblox Anda.\n' +
+                    '2. Username ada di `@username` (bukan Display Name).\n' +
+                    '3. Contoh: Display `John` → Username `@john123`.',
+                }
+              )
+              .setColor(0xed4245);
+
+            const btn = new ButtonBuilder()
+              .setCustomId('roblox_reinput')
+              .setLabel('Input Username Lagi')
+              .setEmoji('🔁')
+              .setStyle(ButtonStyle.Primary);
+
+            const row = new ActionRowBuilder().addComponents(btn);
+
+            await interaction.channel.send({
+              embeds: [embed],
+              components: [row],
+            });
+          } else {
+            await interaction.editReply({
+              content:
+                '✅ Username terverifikasi! Lihat panel di bawah untuk konfirmasi.',
+            });
+
+            const embed = new EmbedBuilder()
+              .setTitle('✨ Username Ditemukan')
+              .setDescription(`${roblox.name} (@${username})`)
+              .addFields(
+                { name: 'Username', value: roblox.name, inline: true },
+                {
+                  name: 'Display Name',
+                  value: roblox.displayName || '-',
+                  inline: true,
+                },
+                {
+                  name: 'User ID',
+                  value: String(roblox.id),
+                  inline: true,
+                }
+              )
+              .setThumbnail(robloxAvatarUrl(roblox.id))
+              .setColor(0x57f287);
+
+            const btnYes = new ButtonBuilder()
+              .setCustomId(`roblox_confirm_${roblox.id}`)
+              .setLabel('Ya, Benar!')
+              .setEmoji('✅')
+              .setStyle(ButtonStyle.Success);
+
+            const btnNo = new ButtonBuilder()
+              .setCustomId('roblox_wrong')
+              .setLabel('Salah, Input Ulang')
+              .setEmoji('❌')
+              .setStyle(ButtonStyle.Danger);
+
+            const row = new ActionRowBuilder().addComponents(btnYes, btnNo);
+
+            await interaction.channel.send({
+              embeds: [embed],
+              components: [row],
+            });
+          }
+        } catch (err) {
+          console.error('lookupRobloxUser error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat menghubungi API Roblox. Coba lagi beberapa saat lagi.',
+          });
+        }
+
+        return;
+      }
+
+      // modal redeem key sebulan
+      if (customId === 'modal_redeem_key_month') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const key = interaction.fields
+          .getTextInputValue('field_key_month')
+          .trim();
+
+        if (!key) {
+          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
+          return;
+        }
+
+        try {
+          const data = await validatePaidKey(key);
+
+          if (data.valid && !data.deleted && !data.expired) {
+            await interaction.editReply({
+              content:
+                `✅ Key sebulan berhasil digunakan!\n` +
+                `Key: \`${key}\`\n` +
+                'Terima kasih sudah menggunakan ExHub.',
+            });
+          } else if (data.expired) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah kadaluarsa.',
+            });
+          } else if (data.deleted) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah diblokir / dihapus.',
+            });
+          } else {
+            await interaction.editReply({
+              content: '❌ Key tidak valid atau sudah pernah digunakan.',
+            });
+          }
+        } catch (err) {
+          console.error('validatePaidKey (month) error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
+          });
+        }
+
+        return;
+      }
+
+      // modal redeem key lifetime
+      if (customId === 'modal_redeem_key_life') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const key = interaction.fields
+          .getTextInputValue('field_key_life')
+          .trim();
+
+        if (!key) {
+          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
+          return;
+        }
+
+        try {
+          const data = await validatePaidKey(key);
+
+          if (data.valid && !data.deleted && !data.expired) {
+            await interaction.editReply({
+              content:
+                `✅ Key lifetime berhasil digunakan!\n` +
+                `Key: \`${key}\`\n` +
+                'Terima kasih sudah menggunakan ExHub.',
+            });
+          } else if (data.expired) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah kadaluarsa.',
+            });
+          } else if (data.deleted) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah diblokir / dihapus.',
+            });
+          } else {
+            await interaction.editReply({
+              content: '❌ Key tidak valid atau sudah pernah digunakan.',
+            });
+          }
+        } catch (err) {
+          console.error('validatePaidKey (life) error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
+          });
+        }
+
+        return;
+      }
+
+      return;
+    }
+  } catch (err) {
+    console.error('interactionCreate error:', err);
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: 'Terjadi error internal saat memproses perintah.',
+          ephemeral: true,
+        });
+      }
+    } catch (_) {}
+  }
+});
+
+// ---------- REGISTER SLASH COMMANDS & LOGIN -------------------
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('sendticketpanel')
+    .setDescription('Kirim panel store / ticket di channel ini'),
+  new SlashCommandBuilder()
+    .setName('setharga_sebulan')
+    .setDescription('Ubah harga paket Key Sebulan')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 15000)')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('setharga_lifetime')
+    .setDescription('Ubah harga paket Key Lifetime')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 25000)')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('setharga_indohangout')
+    .setDescription('Ubah harga paket Indo Hangout Premium')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 10000)')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('generatekeysebulan')
+    .setDescription('Generate key sebulan untuk member')
+    .addUserOption((opt) =>
+      opt
+        .setName('member')
+        .setDescription(
+          'Member yang akan menerima key (jika kosong, tampil di reply)'
+        )
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('generatekeylifetime')
+    .setDescription('Generate key lifetime untuk member')
+    .addUserOption((opt) =>
+      opt
+        .setName('member')
+        .setDescription(
+          'Member yang akan menerima key (jika kosong, tampil di reply)'
+        )
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('redeemkeysebulan')
+    .setDescription('Redeem key sebulan (muncul modal input key)'),
+  new SlashCommandBuilder()
+    .setName('redeemkeylifetime')
+    .setDescription('Redeem key lifetime (muncul modal input key)'),
+  new SlashCommandBuilder()
+    .setName('setwelcomechannel')
+    .setDescription('Set channel untuk welcome message')
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription('Channel tujuan welcome')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('sendreactionrole')
+    .setDescription('Kirim pesan reaction role sederhana')
+    .addRoleOption((opt) =>
+      opt
+        .setName('role')
+        .setDescription('Role yang akan diberikan')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('emoji')
+        .setDescription('Emoji yang akan digunakan untuk reaction')
+        .setRequired(true)
+    )
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription('Channel tempat pesan reaction role (optional)')
+        .setRequired(false)
+    ),
+].map((c) => c.setDMPermission(false).toJSON());
+
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+(async () => {
+  try {
+    console.log('⏳ Registering slash commands...');
+    const guildId = process.env.GUILD_ID;
+
+    if (guildId) {
+      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, guildId), {
+        body: commands,
+      });
+      console.log('✅ Slash commands registered (guild specific).');
+    } else {
+      await rest.put(Routes.applicationCommands(CLIENT_ID), {
+        body: commands,
+      });
+      console.log('✅ Slash commands registered (global).');
+    }
+
+    await client.login(DISCORD_TOKEN);
+  } catch (err) {
+    console.error('Failed to start bot:', err);
+  }
+})();
