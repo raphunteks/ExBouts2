@@ -234,6 +234,26 @@ function toMs(value) {
   return Number.isNaN(n) ? null : n;
 }
 
+// helper: kumpulkan semua array dari sebuah objek JSON (rekursif)
+function collectArraysFromObject(obj, acc) {
+  if (!obj || typeof obj !== 'object') return;
+
+  // kalau sudah array, masukkan dan stop di node ini
+  if (Array.isArray(obj)) {
+    acc.push(obj);
+    return;
+  }
+
+  for (const v of Object.values(obj)) {
+    if (!v) continue;
+    if (Array.isArray(v)) {
+      acc.push(v);
+    } else if (typeof v === 'object') {
+      collectArraysFromObject(v, acc);
+    }
+  }
+}
+
 // Ambil semua paid key milik user dari API utama (dipakai /mykey)
 async function fetchUserPaidKeys(discordId, discordTag) {
   if (!EXHUB_USERINFO_URL) {
@@ -266,14 +286,61 @@ async function fetchUserPaidKeys(discordId, discordTag) {
   }
 
   const now = Date.now();
-  const rawKeys = Array.isArray(data.keys) ? data.keys : [];
-  const paidKeys = [];
+
+  // 1) Kumpulkan SEMUA array dari response (mirip dashboard.js)
+  const candidateArrays = [];
+  collectArraysFromObject(data, candidateArrays);
+
+  const rawKeys = [];
+  for (const arr of candidateArrays) {
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      if (item && typeof item === 'object') {
+        rawKeys.push(item);
+      }
+    }
+  }
+
+  if (rawKeys.length === 0) {
+    console.log(
+      '[DEBUG /mykey] Tidak menemukan array key di response user-info.',
+      'URL =',
+      EXHUB_USERINFO_URL
+    );
+    return [];
+  }
+
+  // Deduplicate berdasarkan token supaya tidak double
+  const byToken = new Map();
 
   for (const k of rawKeys) {
+    let token =
+      k.token ||
+      k.key ||
+      k.keyToken ||
+      (k.info && (k.info.token || k.info.key)) ||
+      null;
+
+    if (!token) continue;
+    token = String(token);
+
+    if (!byToken.has(token)) {
+      byToken.set(token, k);
+    }
+  }
+
+  const uniqKeys = Array.from(byToken.values());
+  const paidKeys = [];
+
+  for (const k of uniqKeys) {
     if (!k) continue;
 
     const providerRaw = String(k.provider || k.source || '').toLowerCase();
-    const tierRaw = k.tier || k.type || (k.info && (k.info.tier || k.info.type)) || '';
+    const tierRaw =
+      k.tier ||
+      k.type ||
+      (k.info && (k.info.tier || k.info.type)) ||
+      '';
     const typeNorm = normalizeKeyType(tierRaw);
 
     // filter free key dari Work.ink / Linkvertise / tier free
@@ -294,14 +361,19 @@ async function fetchUserPaidKeys(discordId, discordTag) {
       null;
 
     if (!token) continue;
+    token = String(token);
 
     const ownerDiscordId =
       k.ownerDiscordId ||
       (k.info && k.info.ownerDiscordId) ||
       null;
 
-    if (ownerDiscordId && String(ownerDiscordId) !== String(discordId)) {
-      // key dimiliki user lain
+    // Kalau backend sudah filter per-discordId, ini boleh kosong.
+    // Kalau ada dan beda user, skip.
+    if (
+      ownerDiscordId &&
+      String(ownerDiscordId) !== String(discordId)
+    ) {
       continue;
     }
 
@@ -335,7 +407,7 @@ async function fetchUserPaidKeys(discordId, discordTag) {
     else status = 'Active';
 
     paidKeys.push({
-      token: String(token),
+      token,
       type: typeNorm || 'paid',
       createdAtMs,
       expiresAfterMs,
@@ -349,6 +421,10 @@ async function fetchUserPaidKeys(discordId, discordTag) {
     const cb = b.createdAtMs || 0;
     return ca - cb;
   });
+
+  console.log(
+    `[DEBUG /mykey] Discord ${discordId} - total paidKeys = ${paidKeys.length}`
+  );
 
   return paidKeys;
 }
