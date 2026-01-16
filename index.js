@@ -74,6 +74,14 @@ const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
+// ---------- SERVER STATS CONFIG --------------------------------
+// Kategori + 4 channel untuk panel "📊 SERVER STATS 📊"
+const SERVER_STATS_CATEGORY_ID = process.env.SERVER_STATS_CATEGORY_ID || null;
+const SERVER_STATS_ALL_ID = process.env.SERVER_STATS_ALL_ID || null;
+const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
+const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
+const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
+
 // harga default (bisa diubah pakai slash command)
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
@@ -441,6 +449,98 @@ async function logOrder(guild, embed) {
   }
 }
 
+// ---------- SERVER STATS HELPER --------------------------------
+
+async function updateServerStats(guild) {
+  try {
+    if (!guild) return;
+
+    // Kalau tidak ada konfigurasi channel, abaikan saja (tidak error).
+    if (
+      !SERVER_STATS_ALL_ID &&
+      !SERVER_STATS_MEMBERS_ID &&
+      !SERVER_STATS_BOTS_ID &&
+      !SERVER_STATS_BOOSTS_ID
+    ) {
+      return;
+    }
+
+    // Fetch member cache (but safe kalau gagal)
+    try {
+      await guild.members.fetch();
+    } catch (err) {
+      console.warn(
+        '[SERVER STATS] guild.members.fetch() error (boleh diabaikan kalau tidak punya Server Members Intent):',
+        err.message
+      );
+    }
+
+    const totalMembers =
+      typeof guild.memberCount === 'number'
+        ? guild.memberCount
+        : guild.members.cache.size;
+
+    const bots = guild.members.cache.filter((m) => m.user.bot).size;
+    const humans = totalMembers - bots;
+    const boosts = guild.premiumSubscriptionCount ?? 0;
+
+    const targets = [
+      {
+        id: SERVER_STATS_ALL_ID,
+        name: `🔒 🌍 • All Members: ${totalMembers}`,
+      },
+      {
+        id: SERVER_STATS_MEMBERS_ID,
+        name: `🔒 📈 • Members: ${humans}`,
+      },
+      {
+        id: SERVER_STATS_BOTS_ID,
+        name: `🔒 🤖 • Bots: ${bots}`,
+      },
+      {
+        id: SERVER_STATS_BOOSTS_ID,
+        name: `🔒 🚀 • Boosts: ${boosts}`,
+      },
+    ];
+
+    for (const t of targets) {
+      if (!t.id) continue;
+      const ch = guild.channels.cache.get(t.id);
+      if (!ch) {
+        console.warn(
+          `[SERVER STATS] Channel dengan ID ${t.id} tidak ditemukan di guild ${guild.id}.`
+        );
+        continue;
+      }
+      if (ch.name !== t.name) {
+        await ch.setName(t.name).catch((err) => {
+          console.error(
+            `[SERVER STATS] Gagal update nama channel ${t.id} di guild ${guild.id}`,
+            err
+          );
+        });
+      }
+    }
+
+    // Opsional: pastikan semua channel server stats berada di kategori yang sama
+    if (SERVER_STATS_CATEGORY_ID) {
+      const category = guild.channels.cache.get(SERVER_STATS_CATEGORY_ID);
+      if (category && category.type === ChannelType.GuildCategory) {
+        for (const t of targets) {
+          if (!t.id) continue;
+          const ch = guild.channels.cache.get(t.id);
+          if (!ch) continue;
+          if (ch.parentId !== category.id) {
+            await ch.setParent(category.id).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[SERVER STATS] updateServerStats error:', err);
+  }
+}
+
 // ---------- DISCORD CLIENT -------------------------------------
 
 const client = new Client({
@@ -459,35 +559,61 @@ const client = new Client({
   ],
 });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
+
+  // Inisialisasi SERVER STATS untuk semua guild yang dipakai bot
+  for (const [, guild] of c.guilds.cache) {
+    await updateServerStats(guild);
+  }
 });
 
-// Welcome message
+// Welcome message + refresh stats
 client.on('guildMemberAdd', async (member) => {
   try {
     const channelId = welcomeChannelId;
-    if (!channelId) return;
+    if (channelId) {
+      const ch = member.guild.channels.cache.get(channelId);
+      if (ch) {
+        const emb = new EmbedBuilder()
+          .setTitle('👋 Selamat Datang!')
+          .setDescription(
+            `Halo ${member}, selamat datang di **${member.guild.name}**!\n\n` +
+              'Pastikan baca rules & pilih role yang sesuai sebelum mulai chat.'
+          )
+          .setThumbnail(
+            member.user.displayAvatarURL({ extension: 'png', size: 256 })
+          )
+          .setColor(0x5865f2);
 
-    const ch = member.guild.channels.cache.get(channelId);
-    if (!ch) return;
+        if (WELCOME_BG_URL) emb.setImage(WELCOME_BG_URL);
 
-    const emb = new EmbedBuilder()
-      .setTitle('👋 Selamat Datang!')
-      .setDescription(
-        `Halo ${member}, selamat datang di **${member.guild.name}**!\n\n` +
-          'Pastikan baca rules & pilih role yang sesuai sebelum mulai chat.'
-      )
-      .setThumbnail(
-        member.user.displayAvatarURL({ extension: 'png', size: 256 })
-      )
-      .setColor(0x5865f2);
+        await ch.send({ content: `<@${member.id}>`, embeds: [emb] });
+      }
+    }
 
-    if (WELCOME_BG_URL) emb.setImage(WELCOME_BG_URL);
-
-    await ch.send({ content: `<@${member.id}>`, embeds: [emb] });
+    // update server stats saat ada member baru
+    await updateServerStats(member.guild);
   } catch (err) {
     console.error('Error on guildMemberAdd:', err);
+  }
+});
+
+// Member leave -> refresh stats
+client.on('guildMemberRemove', async (member) => {
+  try {
+    await updateServerStats(member.guild);
+  } catch (err) {
+    console.error('Error on guildMemberRemove:', err);
+  }
+});
+
+// Guild update (misalnya jumlah boost berubah) -> refresh stats
+client.on('guildUpdate', async (oldGuild, newGuild) => {
+  try {
+    await updateServerStats(newGuild);
+  } catch (err) {
+    console.error('Error on guildUpdate:', err);
   }
 });
 
@@ -865,6 +991,25 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({
           content: `Welcome channel di-set ke ${ch}.`,
           ephemeral: true,
+        });
+      }
+
+      // /refreshserverstats
+      else if (commandName === 'refreshserverstats') {
+        if (!(await ensureOwner())) return;
+        if (!interaction.guild) {
+          await interaction.reply({
+            content: 'Perintah ini hanya bisa digunakan di dalam server.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        await updateServerStats(interaction.guild);
+        await interaction.editReply({
+          content:
+            'SERVER STATS berhasil di-refresh. Jika nama channel belum berubah, cek kembali ID channel di `.env`.',
         });
       }
 
@@ -1839,6 +1984,11 @@ const commands = [
         .setName('channel')
         .setDescription('Channel tujuan welcome')
         .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('refreshserverstats')
+    .setDescription(
+      'Refresh nama channel SERVER STATS (All Members, Members, Bots, Boosts)'
     ),
   new SlashCommandBuilder()
     .setName('sendreactionrole')
