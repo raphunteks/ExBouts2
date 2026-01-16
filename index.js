@@ -507,7 +507,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const expiresTs = Math.floor((Date.now() + ms) / 1000);
         const msg =
-          `🎟️ Key Sebulan:\n\`${key}\`\n` +
+          `🎟️ Key Sebulan:\n\`${key}\`\nSilahkan redeem key diatas di ${channel}.\n` +
           `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
 
         if (target) {
@@ -524,7 +524,7 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silahkan cek DM ${target}, key sudah saya kirim. Silahkan digunakan.`,
+              content: `✅ Silahkan cek key DM ${target}. Balik ke sini untuk reedem /redeemkeysebulan`,
             });
           }
         } else {
@@ -551,7 +551,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const expiresTs = Math.floor((Date.now() + ms) / 1000);
         const msg =
-          `🎟️ Key Lifetime:\n\`${key}\`\n` +
+          `🎟️ Key Lifetime:\n\`${key}\`\nSilahkan redeem key diatas di ${channel}.\n` +
           `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>`;
 
         if (target) {
@@ -568,7 +568,7 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silahkan cek DM ${target}, key sudah saya kirim. Silahkan digunakan.`,
+              content: `✅ Silahkan cek key DM ${target}. Balik ke sini untuk reedem /redeemkeylifetime`,
             });
           }
         } else {
@@ -1334,7 +1334,7 @@ client.on('interactionCreate', async (interaction) => {
 
           await interaction.editReply({
             content:
-              `✅ Key lifetime berhasil digunakan!\n` +
+              `✅ Key lifetime berhasil di redeem, silahkan digunakan!\n` +
               `Key: \`${key}\`\n` +
               'Terima kasih sudah menggunakan ExHub.',
           });
