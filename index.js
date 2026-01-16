@@ -495,6 +495,13 @@ client.on('interactionCreate', async (interaction) => {
         const days = 30;
         const ms = days * 24 * 60 * 60 * 1000;
 
+        // mention channel tempat command dijalankan (idealnya channel ticket)
+        const channelMention =
+          interaction.channel &&
+          interaction.channel.type === ChannelType.GuildText
+            ? `<#${interaction.channel.id}>`
+            : 'channel ticket kamu di server';
+
         // simpan ke API sebagai "belum diredeem" (valid:false)
         try {
           await createPaidKeyOnAPI(key, 'month', ms, {
@@ -509,7 +516,7 @@ client.on('interactionCreate', async (interaction) => {
         const msg =
           `🎟️ Key Sebulan:\n\`${key}\`\n` +
           `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>\n` +
-          'Silakan redeem key ini menggunakan perintah `/redeemkeysebulan` di server.';
+          `Silakan redeem key ini menggunakan perintah \`/redeemkeysebulan\` di ${channelMention}.`;
 
         if (target) {
           await target
@@ -525,7 +532,7 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke sini untuk redeem dengan \`/redeemkeysebulan\`.`,
+              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke ${channelMention} untuk redeem dengan \`/redeemkeysebulan\`.`,
             });
           }
         } else {
@@ -542,6 +549,12 @@ client.on('interactionCreate', async (interaction) => {
         const days = 365;
         const ms = days * 24 * 60 * 60 * 1000;
 
+        const channelMention =
+          interaction.channel &&
+          interaction.channel.type === ChannelType.GuildText
+            ? `<#${interaction.channel.id}>`
+            : 'channel ticket kamu di server';
+
         try {
           await createPaidKeyOnAPI(key, 'lifetime', ms, {
             valid: false,
@@ -555,7 +568,7 @@ client.on('interactionCreate', async (interaction) => {
         const msg =
           `🎟️ Key Lifetime:\n\`${key}\`\n` +
           `Expired: <t:${expiresTs}:R> • <t:${expiresTs}:f>\n` +
-          'Silakan redeem key ini menggunakan perintah `/redeemkeylifetime` di server.';
+          `Silakan redeem key ini menggunakan perintah \`/redeemkeylifetime\` di ${channelMention}.`;
 
         if (target) {
           await target
@@ -571,7 +584,7 @@ client.on('interactionCreate', async (interaction) => {
             interaction.channel.type === ChannelType.GuildText
           ) {
             await interaction.channel.send({
-              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke sini untuk redeem dengan \`/redeemkeylifetime\`.`,
+              content: `✅ Silakan cek DM ${target}, key sudah saya kirim. Balik ke ${channelMention} untuk redeem dengan \`/redeemkeylifetime\`.`,
             });
           }
         } else {
