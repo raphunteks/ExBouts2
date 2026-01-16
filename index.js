@@ -31,11 +31,20 @@ const crypto = require('crypto');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const OWNER_ID = process.env.OWNER_ID;
+
+// OWNER_IDS bisa dari OWNER_IDS atau OWNER_ID (comma / spasi dipisah)
+const RAW_OWNER_IDS =
+  process.env.OWNER_IDS ||
+  process.env.OWNER_ID ||
+  '';
+
+const OWNER_IDS = RAW_OWNER_IDS.split(/[,\s]+/).filter(Boolean);
 
 // kategori untuk ticket (opsional, bisa null)
 const TICKET_CATEGORY_ID =
-  process.env.TICKET_CATEGORY_ID || process.env.CATTEGORY_TICKETCHANNEL_ID || null;
+  process.env.TICKET_CATEGORY_ID ||
+  process.env.CATTEGORY_TICKETCHANNEL_ID ||
+  null;
 
 // channel log order (opsional)
 const CHANNEL_LOGORDER_ID = process.env.CHANNEL_LOGORDER_ID || null;
@@ -70,8 +79,9 @@ const reactionRoles = new Map();
 
 // ---------- HELPER UTILS ---------------------------------------
 
+// sekarang support banyak OWNER_ID
 function isOwner(userId) {
-  return OWNER_ID && userId === OWNER_ID;
+  return OWNER_IDS.includes(userId);
 }
 
 function formatRupiah(num) {
@@ -199,7 +209,13 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember],
+  partials: [
+    Partials.Channel,
+    Partials.Message,
+    Partials.Reaction,
+    Partials.User,
+    Partials.GuildMember,
+  ],
 });
 
 client.once('ready', () => {
@@ -307,7 +323,9 @@ async function sendTicketIntroMessage(channel, user) {
     `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
     '',
     '**Paket Tersedia**',
-    `⚡ Key Sebulan – Rp ${formatRupiah(priceKeyMonth)} (Akses 5 Script • 30 hari)`,
+    `⚡ Key Sebulan – Rp ${formatRupiah(
+      priceKeyMonth
+    )} (Akses 5 Script • 30 hari)`,
     `🔥 Key Lifetime – Rp ${formatRupiah(
       priceKeyLifetime
     )} (Akses 5 Script • 1 tahun)`,
@@ -639,9 +657,10 @@ client.on('interactionCreate', async (interaction) => {
           },
         ];
 
-        if (OWNER_ID) {
+        // semua OWNER_ID dapat akses ticket
+        for (const ownerId of OWNER_IDS) {
           permissionOverwrites.push({
-            id: OWNER_ID,
+            id: ownerId,
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
@@ -670,7 +689,10 @@ client.on('interactionCreate', async (interaction) => {
         const logEmbed = new EmbedBuilder()
           .setTitle('🎫 Ticket Baru Dibuat')
           .addFields(
-            { name: 'User', value: `${interaction.user} (${interaction.user.id})` },
+            {
+              name: 'User',
+              value: `${interaction.user} (${interaction.user.id})`,
+            },
             { name: 'Channel', value: `${channel}` }
           )
           .setTimestamp()
@@ -709,7 +731,9 @@ client.on('interactionCreate', async (interaction) => {
 
       // close ticket (khusus owner / staff dengan ManageChannels)
       if (customId === 'ticket_close') {
-        const member = await interaction.guild.members.fetch(interaction.user.id);
+        const member = await interaction.guild.members.fetch(
+          interaction.user.id
+        );
         if (
           !member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
           !isOwner(interaction.user.id)
@@ -841,7 +865,10 @@ client.on('interactionCreate', async (interaction) => {
         const logEmb = new EmbedBuilder()
           .setTitle('🧾 Order Indo Hangout Premium')
           .addFields(
-            { name: 'Discord User', value: `${interaction.user} (${interaction.user.id})` },
+            {
+              name: 'Discord User',
+              value: `${interaction.user} (${interaction.user.id})`,
+            },
             { name: 'Roblox Username', value: usernameText },
             { name: 'Roblox User ID', value: userIdText },
             { name: 'Nominal', value: `Rp ${formatRupiah(harga)}` },
