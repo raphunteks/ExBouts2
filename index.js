@@ -63,10 +63,10 @@ const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
   'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
-// endpoint untuk ambil semua key milik user (dipakai /mykey)
+// endpoint untuk ambil semua key milik user (dipakai /mykey) – versi PAID+FREE
 const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
-  'https://exc-webs.vercel.app/api/bot/user-info';
+  'https://exc-webs.vercel.app/api/paidfree/user-info';
 
 // background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord / website sendiri)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
@@ -234,199 +234,168 @@ function toMs(value) {
   return Number.isNaN(n) ? null : n;
 }
 
-// helper: kumpulkan semua array dari sebuah objek JSON (rekursif)
-function collectArraysFromObject(obj, acc) {
-  if (!obj || typeof obj !== 'object') return;
-
-  // kalau sudah array, masukkan dan stop di node ini
-  if (Array.isArray(obj)) {
-    acc.push(obj);
-    return;
-  }
-
-  for (const v of Object.values(obj)) {
-    if (!v) continue;
-    if (Array.isArray(v)) {
-      acc.push(v);
-    } else if (typeof v === 'object') {
-      collectArraysFromObject(v, acc);
-    }
-  }
-}
-
-// Ambil semua paid key milik user dari API utama (dipakai /mykey)
-async function fetchUserPaidKeys(discordId, discordTag) {
+// Ambil semua PAID key milik user dari API /api/paidfree/user-info (dipakai /mykey)
+async function fetchUserPaidKeys(discordUser) {
   if (!EXHUB_USERINFO_URL) {
     throw new Error('EXHUB_USERINFO_URL belum dikonfigurasi.');
   }
 
-  const payload = {
-    discordId: String(discordId),
-    discordTag: discordTag || null,
-  };
-
-  const res = await fetch(EXHUB_USERINFO_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(
-      `User-info API error ${res.status}: ${text.slice(0, 200)}`
-    );
-  }
-
-  let data;
   try {
-    data = await res.json();
-  } catch (e) {
-    throw new Error('User-info API mengembalikan JSON yang tidak valid.');
-  }
+    const res = await fetch(EXHUB_USERINFO_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        discordId: discordUser.id,
+        discordTag: discordUser.username,
+      }),
+    });
 
-  const now = Date.now();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.log(
+        '[DEBUG /mykey] Gagal parse JSON dari user-info:',
+        e,
+        text.slice(0, 200)
+      );
+      return [];
+    }
 
-  // 1) Kumpulkan SEMUA array dari response (mirip dashboard.js)
-  const candidateArrays = [];
-  collectArraysFromObject(data, candidateArrays);
+    if (!data || !Array.isArray(data.keys)) {
+      console.log(
+        '[DEBUG /mykey] Tidak menemukan array key di response user-info. URL =',
+        EXHUB_USERINFO_URL
+      );
+      return [];
+    }
 
-  const rawKeys = [];
-  for (const arr of candidateArrays) {
-    if (!Array.isArray(arr)) continue;
-    for (const item of arr) {
-      if (item && typeof item === 'object') {
-        rawKeys.push(item);
+    const now = Date.now();
+    const rawKeys = data.keys;
+
+    // Deduplicate berdasarkan token supaya tidak double (kalau suatu saat backend dobel-isi)
+    const byToken = new Map();
+    for (const k of rawKeys) {
+      if (!k || typeof k !== 'object') continue;
+
+      let token =
+        k.token ||
+        k.key ||
+        k.keyToken ||
+        (k.info && (k.info.token || k.info.key)) ||
+        null;
+
+      if (!token) continue;
+      token = String(token);
+
+      if (!byToken.has(token)) {
+        byToken.set(token, k);
       }
     }
-  }
 
-  if (rawKeys.length === 0) {
+    const uniqKeys = Array.from(byToken.values());
+    const paidKeys = [];
+
+    for (const k of uniqKeys) {
+      if (!k) continue;
+
+      const providerRaw = String(k.provider || k.source || '').toLowerCase();
+      const tierRaw =
+        k.tier ||
+        k.type ||
+        (k.info && (k.info.tier || k.info.type)) ||
+        '';
+      const typeNorm = normalizeKeyType(tierRaw);
+
+      // filter free key dari Work.ink / Linkvertise / tier free
+      const isFree =
+        typeNorm === 'free' ||
+        providerRaw === 'work.ink' ||
+        providerRaw === 'workink' ||
+        providerRaw.includes('linkvertise') ||
+        k.free === true;
+
+      if (isFree) continue;
+
+      let token =
+        k.token ||
+        k.key ||
+        k.keyToken ||
+        (k.info && (k.info.token || k.info.key)) ||
+        null;
+
+      if (!token) continue;
+      token = String(token);
+
+      const ownerDiscordId =
+        k.ownerDiscordId ||
+        (k.info && k.info.ownerDiscordId) ||
+        null;
+
+      // Kalau backend sudah filter per-discordId, ini boleh kosong.
+      // Kalau ada dan beda user, skip.
+      if (
+        ownerDiscordId &&
+        String(ownerDiscordId) !== String(discordUser.id)
+      ) {
+        continue;
+      }
+
+      const createdAtMs =
+        toMs(k.createdAt) ||
+        (k.info ? toMs(k.info.createdAt) : null);
+
+      const expiresAfterMs =
+        toMs(k.expiresAfter) ||
+        toMs(k.expiresAtMs) ||
+        toMs(k.expiresAt) ||
+        (k.info ? toMs(k.info.expiresAfter) : null);
+
+      const deleted = !!(k.deleted || (k.info && k.info.deleted));
+      const valid =
+        typeof k.valid === 'boolean'
+          ? k.valid
+          : k.info && typeof k.info.valid === 'boolean'
+          ? k.info.valid
+          : true;
+
+      const expired =
+        expiresAfterMs && typeof expiresAfterMs === 'number'
+          ? now > expiresAfterMs
+          : !!k.expired;
+
+      let status;
+      if (deleted) status = 'Deleted';
+      else if (expired) status = 'Expired';
+      else if (!valid) status = 'Not Redeemed';
+      else status = 'Active';
+
+      paidKeys.push({
+        token,
+        type: typeNorm || 'paid',
+        createdAtMs,
+        expiresAfterMs,
+        status,
+      });
+    }
+
+    // sort berdasarkan tanggal order (createdAt) dari lama -> baru
+    paidKeys.sort((a, b) => {
+      const ca = a.createdAtMs || 0;
+      const cb = b.createdAtMs || 0;
+      return ca - cb;
+    });
+
     console.log(
-      '[DEBUG /mykey] Tidak menemukan array key di response user-info.',
-      'URL =',
-      EXHUB_USERINFO_URL
+      `[DEBUG /mykey] Discord ${discordUser.id} - total paidKeys = ${paidKeys.length}`
     );
+
+    return paidKeys;
+  } catch (err) {
+    console.log('[DEBUG /mykey] Error call user-info:', err);
     return [];
   }
-
-  // Deduplicate berdasarkan token supaya tidak double
-  const byToken = new Map();
-
-  for (const k of rawKeys) {
-    let token =
-      k.token ||
-      k.key ||
-      k.keyToken ||
-      (k.info && (k.info.token || k.info.key)) ||
-      null;
-
-    if (!token) continue;
-    token = String(token);
-
-    if (!byToken.has(token)) {
-      byToken.set(token, k);
-    }
-  }
-
-  const uniqKeys = Array.from(byToken.values());
-  const paidKeys = [];
-
-  for (const k of uniqKeys) {
-    if (!k) continue;
-
-    const providerRaw = String(k.provider || k.source || '').toLowerCase();
-    const tierRaw =
-      k.tier ||
-      k.type ||
-      (k.info && (k.info.tier || k.info.type)) ||
-      '';
-    const typeNorm = normalizeKeyType(tierRaw);
-
-    // filter free key dari Work.ink / Linkvertise / tier free
-    const isFree =
-      typeNorm === 'free' ||
-      providerRaw === 'work.ink' ||
-      providerRaw === 'workink' ||
-      providerRaw.includes('linkvertise') ||
-      k.free === true;
-
-    if (isFree) continue;
-
-    let token =
-      k.token ||
-      k.key ||
-      k.keyToken ||
-      (k.info && (k.info.token || k.info.key)) ||
-      null;
-
-    if (!token) continue;
-    token = String(token);
-
-    const ownerDiscordId =
-      k.ownerDiscordId ||
-      (k.info && k.info.ownerDiscordId) ||
-      null;
-
-    // Kalau backend sudah filter per-discordId, ini boleh kosong.
-    // Kalau ada dan beda user, skip.
-    if (
-      ownerDiscordId &&
-      String(ownerDiscordId) !== String(discordId)
-    ) {
-      continue;
-    }
-
-    const createdAtMs =
-      toMs(k.createdAt) ||
-      (k.info ? toMs(k.info.createdAt) : null);
-
-    const expiresAfterMs =
-      toMs(k.expiresAfter) ||
-      toMs(k.expiresAtMs) ||
-      toMs(k.expiresAt) ||
-      (k.info ? toMs(k.info.expiresAfter) : null);
-
-    const deleted = !!(k.deleted || (k.info && k.info.deleted));
-    const valid =
-      typeof k.valid === 'boolean'
-        ? k.valid
-        : k.info && typeof k.info.valid === 'boolean'
-        ? k.info.valid
-        : true;
-
-    const expired =
-      expiresAfterMs && typeof expiresAfterMs === 'number'
-        ? now > expiresAfterMs
-        : false;
-
-    let status;
-    if (deleted) status = 'Deleted';
-    else if (expired) status = 'Expired';
-    else if (!valid) status = 'Not Redeemed';
-    else status = 'Active';
-
-    paidKeys.push({
-      token,
-      type: typeNorm || 'paid',
-      createdAtMs,
-      expiresAfterMs,
-      status,
-    });
-  }
-
-  // sort berdasarkan tanggal order (createdAt) dari lama -> baru
-  paidKeys.sort((a, b) => {
-    const ca = a.createdAtMs || 0;
-    const cb = b.createdAtMs || 0;
-    return ca - cb;
-  });
-
-  console.log(
-    `[DEBUG /mykey] Discord ${discordId} - total paidKeys = ${paidKeys.length}`
-  );
-
-  return paidKeys;
 }
 
 // lookup username Roblox -> { id, name, displayName }
@@ -931,10 +900,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
         try {
-          const userId = interaction.user.id;
-          const userTag = `${interaction.user.username}#${interaction.user.discriminator ?? '0'}`;
-
-          const keys = await fetchUserPaidKeys(userId, userTag);
+          const keys = await fetchUserPaidKeys(interaction.user);
 
           if (!keys || keys.length === 0) {
             await interaction.editReply({
