@@ -23,6 +23,7 @@ const {
   PermissionsBitField,
   ChannelType,
   AttachmentBuilder, // kalau nanti mau pakai file, sekarang belum wajib
+  Events,
 } = require('discord.js');
 
 const crypto = require('crypto');
@@ -81,7 +82,7 @@ const reactionRoles = new Map();
 
 // sekarang support banyak OWNER_ID
 function isOwner(userId) {
-  return OWNER_IDS.includes(userId);
+  return OWNER_IDS.includes(String(userId));
 }
 
 function formatRupiah(num) {
@@ -218,8 +219,8 @@ const client = new Client({
   ],
 });
 
-client.once('ready', () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+client.once(Events.ClientReady, (c) => {
+  console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
 // Welcome message
@@ -657,10 +658,19 @@ client.on('interactionCreate', async (interaction) => {
           },
         ];
 
-        // semua OWNER_ID dapat akses ticket
-        for (const ownerId of OWNER_IDS) {
+        // semua OWNER_ID yang benar-benar ada di guild dapat akses ticket
+        for (const ownerIdRaw of OWNER_IDS) {
+          const id = String(ownerIdRaw).trim();
+          if (!id || id === interaction.user.id) continue;
+
+          const ownerMember = guild.members.cache.get(id);
+          const ownerRole = guild.roles.cache.get(id);
+
+          // skip kalau bukan member dan bukan role di guild ini
+          if (!ownerMember && !ownerRole) continue;
+
           permissionOverwrites.push({
-            id: ownerId,
+            id,
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
