@@ -126,6 +126,25 @@ function getTicketOwnerId(channel) {
   return match ? match[1] : null;
 }
 
+// Tentukan pemilik key (Discord ID) untuk generate key
+// Priority:
+// 1. Kalau ada target (option member)  -> target.id
+// 2. Kalau di dalam ticket channel      -> OwnerID dari ticket
+// 3. Fallback                           -> interaction.user.id
+function resolveKeyOwnerDiscordId(interaction, targetUser) {
+  if (targetUser) {
+    return String(targetUser.id);
+  }
+
+  const ch = interaction.channel;
+  if (ch && ch.type === ChannelType.GuildText) {
+    const ticketOwnerId = getTicketOwnerId(ch);
+    if (ticketOwnerId) return String(ticketOwnerId);
+  }
+
+  return String(interaction.user.id);
+}
+
 // Call API untuk cek key
 async function validatePaidKey(key) {
   const base = PAIDKEY_VALIDATE_BASE.replace(/\/$/, '');
@@ -145,7 +164,7 @@ async function validatePaidKey(key) {
  * @param {string} key - token key, misal EXHUBPAID-XXXX
  * @param {string} type - 'month' | 'lifetime' | lainnya
  * @param {number|null} expiresDurationMs - durasi ms (boleh null kalau override.expiresAfter sudah ada)
- * @param {object} override - { valid, deleted, createdAt, expiresAfter, byIp }
+ * @param {object} override - { valid, deleted, createdAt, expiresAfter, byIp, ownerDiscordId }
  */
 async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   if (!PAIDKEY_CREATE_URL) {
@@ -158,6 +177,8 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   const now = Date.now();
   const createdAt = override.createdAt ?? now;
 
+  const normalizedType = normalizeKeyType(type || '') || (type || null);
+
   let expiresAfter = override.expiresAfter;
   if (!expiresAfter) {
     if (expiresDurationMs && expiresDurationMs > 0) {
@@ -167,17 +188,24 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
     }
   }
 
+  const info = {
+    token: key,
+    createdAt,
+    byIp: override.byIp || 'discord-bot',
+    expiresAfter,
+    type: normalizedType,
+  };
+
+  // Bind pemilik key (Discord ID) jika ada
+  if (override.ownerDiscordId) {
+    info.ownerDiscordId = String(override.ownerDiscordId);
+  }
+
   const payload = {
     valid: override.valid ?? false,
     deleted: override.deleted ?? false,
     expired: false,
-    info: {
-      token: key,
-      createdAt,
-      byIp: override.byIp || 'discord-bot',
-      expiresAfter,
-      type,
-    },
+    info,
   };
 
   const res = await fetch(PAIDKEY_CREATE_URL, {
@@ -512,6 +540,9 @@ client.on('interactionCreate', async (interaction) => {
         const days = 30;
         const ms = days * 24 * 60 * 60 * 1000;
 
+        // pemilik key (Discord ID) – di-bind ke yang order
+        const ownerDiscordId = resolveKeyOwnerDiscordId(interaction, target);
+
         // mention channel tempat command dijalankan (idealnya channel ticket)
         const channelMention =
           interaction.channel &&
@@ -524,6 +555,7 @@ client.on('interactionCreate', async (interaction) => {
           await createPaidKeyOnAPI(key, 'month', ms, {
             valid: false,
             byIp: 'discord-bot-generate-month',
+            ownerDiscordId,
           });
         } catch (err) {
           console.error('createPaidKeyOnAPI (month) error:', err);
@@ -566,6 +598,9 @@ client.on('interactionCreate', async (interaction) => {
         const days = 365;
         const ms = days * 24 * 60 * 60 * 1000;
 
+        // pemilik key (Discord ID) – di-bind ke yang order
+        const ownerDiscordId = resolveKeyOwnerDiscordId(interaction, target);
+
         const channelMention =
           interaction.channel &&
           interaction.channel.type === ChannelType.GuildText
@@ -576,6 +611,7 @@ client.on('interactionCreate', async (interaction) => {
           await createPaidKeyOnAPI(key, 'lifetime', ms, {
             valid: false,
             byIp: 'discord-bot-generate-lifetime',
+            ownerDiscordId,
           });
         } catch (err) {
           console.error('createPaidKeyOnAPI (lifetime) error:', err);
@@ -1278,7 +1314,22 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // Di titik ini: key ada, belum expired, belum deleted, valid=false, tipe=month
+          // CEK PEMILIK KEY: harus sama dengan akun Discord yang redeem
+          if (info.ownerDiscordId && String(info.ownerDiscordId) !== interaction.user.id) {
+            await interaction.editReply({
+              content:
+                '❌ Key ini terikat ke akun Discord lain.\n' +
+                'Gunakan akun Discord yang sama dengan yang melakukan order.',
+            });
+            return;
+          }
+
+          // Kalau belum ada ownerDiscordId (key lama / manual), bind ke user ini
+          const ownerDiscordId = info.ownerDiscordId
+            ? String(info.ownerDiscordId)
+            : interaction.user.id;
+
+          // Di titik ini: key ada, belum expired, belum deleted, valid=false, tipe=month, owner cocok
           // -> anggap redeem pertama, update ke valid:true
           try {
             await createPaidKeyOnAPI(key, keyType, null, {
@@ -1287,6 +1338,7 @@ client.on('interactionCreate', async (interaction) => {
               createdAt: info.createdAt,
               expiresAfter: info.expiresAfter,
               byIp: 'discord-bot-redeem-month',
+              ownerDiscordId,
             });
           } catch (err) {
             console.error(
@@ -1384,6 +1436,20 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
+          // CEK PEMILIK KEY
+          if (info.ownerDiscordId && String(info.ownerDiscordId) !== interaction.user.id) {
+            await interaction.editReply({
+              content:
+                '❌ Key ini terikat ke akun Discord lain.\n' +
+                'Gunakan akun Discord yang sama dengan yang melakukan order.',
+            });
+            return;
+          }
+
+          const ownerDiscordId = info.ownerDiscordId
+            ? String(info.ownerDiscordId)
+            : interaction.user.id;
+
           // Redeem pertama -> set valid:true di API
           try {
             await createPaidKeyOnAPI(key, keyType, null, {
@@ -1392,6 +1458,7 @@ client.on('interactionCreate', async (interaction) => {
               createdAt: info.createdAt,
               expiresAfter: info.expiresAfter,
               byIp: 'discord-bot-redeem-lifetime',
+              ownerDiscordId,
             });
           } catch (err) {
             console.error(
