@@ -22,7 +22,7 @@ const {
   TextInputStyle,
   PermissionsBitField,
   ChannelType,
-  AttachmentBuilder, // kalau nanti mau pakai file, sekarang belum wajib
+  AttachmentBuilder,
   Events,
 } = require('discord.js');
 
@@ -58,8 +58,10 @@ const PAIDKEY_VALIDATE_BASE =
   process.env.PAIDKEY_VALIDATE_BASE ||
   'https://exc-webs.vercel.app/api/paidkey/isValidate';
 
-// endpoint untuk create/simpan key di API (WAJIB kamu set di .env)
-const PAIDKEY_CREATE_URL = process.env.PAIDKEY_CREATE_URL || null;
+// endpoint untuk create/simpan key di API
+const PAIDKEY_CREATE_URL =
+  process.env.PAIDKEY_CREATE_URL ||
+  'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
 // background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
@@ -109,37 +111,54 @@ function getTicketOwnerId(channel) {
 
 // Call API untuk cek key
 async function validatePaidKey(key) {
-  const url = `${PAIDKEY_VALIDATE_BASE.replace(/\/$/, '')}/${encodeURIComponent(
-    key
-  )}`;
+  const base = PAIDKEY_VALIDATE_BASE.replace(/\/$/, '');
+  const url = `${base}/${encodeURIComponent(key)}`;
 
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Validate key HTTP ${res.status}`);
+    const text = await res.text().catch(() => '');
+    throw new Error(`Validate key HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
   return res.json();
 }
 
-// Call API untuk create/simpan key di server ExHub
-async function createPaidKeyOnAPI(key, type, expiresAfterMs) {
+/**
+ * Call API untuk create/update key di server ExHub
+ *
+ * @param {string} key - token key, misal EXHUBPAID-XXXX
+ * @param {string} type - 'month' | 'lifetime' | lainnya
+ * @param {number|null} expiresDurationMs - durasi ms (boleh null kalau override.expiresAfter sudah ada)
+ * @param {object} override - { valid, deleted, createdAt, expiresAfter, byIp }
+ */
+async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   if (!PAIDKEY_CREATE_URL) {
-    // Kalau belum di-set, lewati saja (bot tetap jalan, tapi tidak kirim ke API)
     console.warn(
       '[WARN] PAIDKEY_CREATE_URL belum diisi, key tidak dikirim ke API.'
     );
     return;
   }
 
-  const createdAt = Date.now();
+  const now = Date.now();
+  const createdAt = override.createdAt ?? now;
+
+  let expiresAfter = override.expiresAfter;
+  if (!expiresAfter) {
+    if (expiresDurationMs && expiresDurationMs > 0) {
+      expiresAfter = createdAt + expiresDurationMs;
+    } else {
+      expiresAfter = createdAt;
+    }
+  }
+
   const payload = {
-    valid: false,
-    deleted: false,
+    valid: override.valid ?? false,
+    deleted: override.deleted ?? false,
     expired: false,
     info: {
       token: key,
       createdAt,
-      byIp: 'discord-bot', // bisa kamu ganti/isi sesuai design backend
-      expiresAfter: createdAt + expiresAfterMs,
+      byIp: override.byIp || 'discord-bot',
+      expiresAfter,
       type,
     },
   };
@@ -153,7 +172,7 @@ async function createPaidKeyOnAPI(key, type, expiresAfterMs) {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(
-      `Create key API error ${res.status}: ${text.slice(0, 200)}`
+      `Create/Update key API error ${res.status}: ${text.slice(0, 200)}`
     );
   }
 }
@@ -476,9 +495,12 @@ client.on('interactionCreate', async (interaction) => {
         const days = 30;
         const ms = days * 24 * 60 * 60 * 1000;
 
-        // kirim ke API (opsional, tergantung PAIDKEY_CREATE_URL)
+        // simpan ke API sebagai "belum diredeem" (valid:false)
         try {
-          await createPaidKeyOnAPI(key, 'month', ms);
+          await createPaidKeyOnAPI(key, 'month', ms, {
+            valid: false,
+            byIp: 'discord-bot-generate-month',
+          });
         } catch (err) {
           console.error('createPaidKeyOnAPI (month) error:', err);
         }
@@ -510,7 +532,10 @@ client.on('interactionCreate', async (interaction) => {
         const ms = days * 24 * 60 * 60 * 1000;
 
         try {
-          await createPaidKeyOnAPI(key, 'lifetime', ms);
+          await createPaidKeyOnAPI(key, 'lifetime', ms, {
+            valid: false,
+            byIp: 'discord-bot-generate-lifetime',
+          });
         } catch (err) {
           console.error('createPaidKeyOnAPI (lifetime) error:', err);
         }
@@ -666,7 +691,6 @@ client.on('interactionCreate', async (interaction) => {
           const ownerMember = guild.members.cache.get(id);
           const ownerRole = guild.roles.cache.get(id);
 
-          // skip kalau bukan member dan bukan role di guild ini
           if (!ownerMember && !ownerRole) continue;
 
           permissionOverwrites.push({
@@ -816,7 +840,6 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        // disable tombol di message yang sama
         const embed = interaction.message.embeds[0];
         let usernameText = '-';
         let displayNameText = '-';
@@ -1091,9 +1114,10 @@ client.on('interactionCreate', async (interaction) => {
       if (customId === 'modal_redeem_key_month') {
         await interaction.deferReply({ ephemeral: true });
 
-        const key = interaction.fields
+        const rawKey = interaction.fields
           .getTextInputValue('field_key_month')
           .trim();
+        const key = rawKey.toUpperCase();
 
         if (!key) {
           await interaction.editReply({ content: 'Key tidak boleh kosong.' });
@@ -1102,27 +1126,65 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
           const data = await validatePaidKey(key);
+          const info = data.info || null;
 
-          if (data.valid && !data.deleted && !data.expired) {
+          if (!info) {
             await interaction.editReply({
-              content:
-                `✅ Key sebulan berhasil digunakan!\n` +
-                `Key: \`${key}\`\n` +
-                'Terima kasih sudah menggunakan ExHub.',
+              content: '❌ Key tidak ditemukan di database.',
             });
-          } else if (data.expired) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah kadaluarsa.',
-            });
-          } else if (data.deleted) {
+            return;
+          }
+
+          if (data.deleted) {
             await interaction.editReply({
               content: '❌ Key ini sudah diblokir / dihapus.',
             });
-          } else {
-            await interaction.editReply({
-              content: '❌ Key tidak valid atau sudah pernah digunakan.',
-            });
+            return;
           }
+
+          if (data.expired) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah kadaluarsa.',
+            });
+            return;
+          }
+
+          if (data.valid) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
+            });
+            return;
+          }
+
+          // Di titik ini: key ada, belum expired, belum deleted, valid=false
+          // -> anggap redeem pertama, update ke valid:true
+          try {
+            await createPaidKeyOnAPI(key, info.type || 'month', null, {
+              valid: true,
+              deleted: false,
+              createdAt: info.createdAt,
+              expiresAfter: info.expiresAfter,
+              byIp: 'discord-bot-redeem-month',
+            });
+          } catch (err) {
+            console.error(
+              'createPaidKeyOnAPI (redeem month) error:',
+              err
+            );
+            await interaction.editReply({
+              content:
+                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
+            });
+            return;
+          }
+
+          await interaction.editReply({
+            content:
+              `✅ Key sebulan berhasil digunakan!\n` +
+              `Key: \`${key}\`\n` +
+              'Terima kasih sudah menggunakan ExHub.',
+          });
         } catch (err) {
           console.error('validatePaidKey (month) error:', err);
           await interaction.editReply({
@@ -1138,9 +1200,10 @@ client.on('interactionCreate', async (interaction) => {
       if (customId === 'modal_redeem_key_life') {
         await interaction.deferReply({ ephemeral: true });
 
-        const key = interaction.fields
+        const rawKey = interaction.fields
           .getTextInputValue('field_key_life')
           .trim();
+        const key = rawKey.toUpperCase();
 
         if (!key) {
           await interaction.editReply({ content: 'Key tidak boleh kosong.' });
@@ -1149,27 +1212,64 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
           const data = await validatePaidKey(key);
+          const info = data.info || null;
 
-          if (data.valid && !data.deleted && !data.expired) {
+          if (!info) {
             await interaction.editReply({
-              content:
-                `✅ Key lifetime berhasil digunakan!\n` +
-                `Key: \`${key}\`\n` +
-                'Terima kasih sudah menggunakan ExHub.',
+              content: '❌ Key tidak ditemukan di database.',
             });
-          } else if (data.expired) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah kadaluarsa.',
-            });
-          } else if (data.deleted) {
+            return;
+          }
+
+          if (data.deleted) {
             await interaction.editReply({
               content: '❌ Key ini sudah diblokir / dihapus.',
             });
-          } else {
-            await interaction.editReply({
-              content: '❌ Key tidak valid atau sudah pernah digunakan.',
-            });
+            return;
           }
+
+          if (data.expired) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah kadaluarsa.',
+            });
+            return;
+          }
+
+          if (data.valid) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
+            });
+            return;
+          }
+
+          // Redeem pertama -> set valid:true di API
+          try {
+            await createPaidKeyOnAPI(key, info.type || 'lifetime', null, {
+              valid: true,
+              deleted: false,
+              createdAt: info.createdAt,
+              expiresAfter: info.expiresAfter,
+              byIp: 'discord-bot-redeem-lifetime',
+            });
+          } catch (err) {
+            console.error(
+              'createPaidKeyOnAPI (redeem lifetime) error:',
+              err
+            );
+            await interaction.editReply({
+              content:
+                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
+            });
+            return;
+          }
+
+          await interaction.editReply({
+            content:
+              `✅ Key lifetime berhasil digunakan!\n` +
+              `Key: \`${key}\`\n` +
+              'Terima kasih sudah menggunakan ExHub.',
+          });
         } catch (err) {
           console.error('validatePaidKey (life) error:', err);
           await interaction.editReply({
@@ -1293,6 +1393,20 @@ const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
 (async () => {
   try {
+    if (!DISCORD_TOKEN || !CLIENT_ID) {
+      console.error(
+        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway.'
+      );
+      return;
+    }
+
+    console.log('DEBUG CLIENT_ID:', CLIENT_ID);
+    console.log('DEBUG GUILD_ID:', process.env.GUILD_ID);
+    console.log(
+      'DEBUG TOKEN LENGTH:',
+      DISCORD_TOKEN ? DISCORD_TOKEN.length : 'NO TOKEN'
+    );
+
     console.log('⏳ Registering slash commands...');
     const guildId = process.env.GUILD_ID;
 
