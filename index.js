@@ -63,7 +63,7 @@ const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
   'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
-// background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord)
+// background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord / website sendiri)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
@@ -518,6 +518,15 @@ client.on('interactionCreate', async (interaction) => {
             content: `Key sebulan dikirim ke DM ${target}.`,
             ephemeral: true,
           });
+
+          if (
+            interaction.channel &&
+            interaction.channel.type === ChannelType.GuildText
+          ) {
+            await interaction.channel.send({
+              content: `✅ Silahkan cek DM ${target}, key sudah saya kirim. Silahkan digunakan.`,
+            });
+          }
         } else {
           await interaction.reply({ content: msg, ephemeral: true });
         }
@@ -553,6 +562,15 @@ client.on('interactionCreate', async (interaction) => {
             content: `Key lifetime dikirim ke DM ${target}.`,
             ephemeral: true,
           });
+
+          if (
+            interaction.channel &&
+            interaction.channel.type === ChannelType.GuildText
+          ) {
+            await interaction.channel.send({
+              content: `✅ Silahkan cek DM ${target}, key sudah saya kirim. Silahkan digunakan.`,
+            });
+          }
         } else {
           await interaction.reply({ content: msg, ephemeral: true });
         }
@@ -937,24 +955,74 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (value === 'KEY_MONTH') {
+          const harga = priceKeyMonth;
+          const instruksi = new EmbedBuilder()
+            .setTitle('✨ Instruksi Pembayaran — Key Sebulan')
+            .setDescription('Scan QRIS di bawah untuk membayar')
+            .addFields(
+              {
+                name: 'Detail Pesanan',
+                value:
+                  `Paket   : Key Sebulan\n` +
+                  `Nominal : Rp ${formatRupiah(harga)}`,
+              },
+              {
+                name: 'Langkah Pembayaran',
+                value:
+                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+                  '2. Bayar sesuai nominal.\n' +
+                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+              },
+              {
+                name: 'Jam Operasional',
+                value: '08:00 - 23:00 WIB',
+              }
+            )
+            .setColor(0xfee75c);
+
+          if (QRIS_IMAGE_URL) {
+            instruksi.setImage(QRIS_IMAGE_URL);
+          }
+
           await interaction.reply({
-            content:
-              `Kamu memilih paket **Key Sebulan** (Rp ${formatRupiah(
-                priceKeyMonth
-              )}).\n` +
-              'Silakan lakukan pembayaran sesuai instruksi admin. ' +
-              'Setelah pembayaran diterima, admin akan mengirim key melalui perintah `/generatekeysebulan`.',
-            ephemeral: true,
+            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+            embeds: [instruksi],
           });
         } else if (value === 'KEY_LIFE') {
+          const harga = priceKeyLifetime;
+          const instruksi = new EmbedBuilder()
+            .setTitle('✨ Instruksi Pembayaran — Key Lifetime')
+            .setDescription('Scan QRIS di bawah untuk membayar')
+            .addFields(
+              {
+                name: 'Detail Pesanan',
+                value:
+                  `Paket   : Key Lifetime\n` +
+                  `Nominal : Rp ${formatRupiah(harga)}`,
+              },
+              {
+                name: 'Langkah Pembayaran',
+                value:
+                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+                  '2. Bayar sesuai nominal.\n' +
+                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+              },
+              {
+                name: 'Jam Operasional',
+                value: '08:00 - 23:00 WIB',
+              }
+            )
+            .setColor(0xfee75c);
+
+          if (QRIS_IMAGE_URL) {
+            instruksi.setImage(QRIS_IMAGE_URL);
+          }
+
           await interaction.reply({
-            content:
-              `Kamu memilih paket **Key Lifetime** (Rp ${formatRupiah(
-                priceKeyLifetime
-              )}).\n` +
-              'Silakan lakukan pembayaran sesuai instruksi admin. ' +
-              'Setelah pembayaran diterima, admin akan mengirim key melalui perintah `/generatekeylifetime`.',
-            ephemeral: true,
+            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+            embeds: [instruksi],
           });
         } else if (value === 'INDO_VIP') {
           const modal = new ModalBuilder()
