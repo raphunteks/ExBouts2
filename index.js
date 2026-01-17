@@ -27,11 +27,15 @@ const {
 } = require('discord.js');
 
 const crypto = require('crypto');
+const os = require('os'); // <<— untuk /runtime spesifikasi VPS
 
 // ---------- ENV & CONFIG ---------------------------------------
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+
+// Waktu start bot (dipakai /runtime)
+const BOT_START_TIME = Date.now();
 
 // OWNER_IDS bisa dari OWNER_IDS atau OWNER_ID (comma / spasi dipisah)
 const RAW_OWNER_IDS =
@@ -68,7 +72,7 @@ const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
-// background untuk welcome (gambar 700x250 yang kamu host di mana saja / CDN Discord / website sendiri)
+// background untuk welcome (gambar 700x250 yang kamu host di mana saja)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
@@ -110,6 +114,15 @@ function generatePaidKey() {
   return `EXHUBPAID-${segment}`;
 }
 
+// Format detik -> HH:MM:SS (untuk /runtime)
+function formatSecondsToHMS(sec) {
+  const s = sec % 60;
+  const m = Math.floor(sec / 60) % 60;
+  const h = Math.floor(sec / 3600);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
 // Normalisasi tipe key yang tersimpan di API
 function normalizeKeyType(raw) {
   if (!raw) return '';
@@ -140,10 +153,6 @@ function getTicketOwnerId(channel) {
 }
 
 // Tentukan pemilik key (Discord ID) untuk generate key
-// Priority:
-// 1. Kalau ada target (option member)  -> target.id
-// 2. Kalau di dalam ticket channel      -> OwnerID dari ticket
-// 3. Fallback                           -> interaction.user.id
 function resolveKeyOwnerDiscordId(interaction, targetUser) {
   if (targetUser) {
     return String(targetUser.id);
@@ -173,11 +182,6 @@ async function validatePaidKey(key) {
 
 /**
  * Call API untuk create/update key di server ExHub
- *
- * @param {string} key - token key, misal EXHUBPAID-XXXX
- * @param {string} type - 'month' | 'lifetime' | lainnya
- * @param {number|null} expiresDurationMs - durasi ms (boleh null kalau override.expiresAfter sudah ada)
- * @param {object} override - { valid, deleted, createdAt, expiresAfter, byIp, ownerDiscordId }
  */
 async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   if (!PAIDKEY_CREATE_URL) {
@@ -282,7 +286,7 @@ async function fetchUserPaidKeys(discordUser) {
     const now = Date.now();
     const rawKeys = data.keys;
 
-    // Deduplicate berdasarkan token supaya tidak double (kalau suatu saat backend dobel-isi)
+    // Deduplicate berdasarkan token
     const byToken = new Map();
     for (const k of rawKeys) {
       if (!k || typeof k !== 'object') continue;
@@ -316,7 +320,7 @@ async function fetchUserPaidKeys(discordUser) {
         '';
       const typeNorm = normalizeKeyType(tierRaw);
 
-      // filter free key dari Work.ink / Linkvertise / tier free
+      // filter free key
       const isFree =
         typeNorm === 'free' ||
         providerRaw === 'work.ink' ||
@@ -388,7 +392,6 @@ async function fetchUserPaidKeys(discordUser) {
       });
     }
 
-    // sort berdasarkan tanggal order (createdAt) dari lama -> baru
     paidKeys.sort((a, b) => {
       const ca = a.createdAtMs || 0;
       const cb = b.createdAtMs || 0;
@@ -455,7 +458,6 @@ async function updateServerStats(guild) {
   try {
     if (!guild) return;
 
-    // Kalau tidak ada konfigurasi channel, abaikan saja (tidak error).
     if (
       !SERVER_STATS_ALL_ID &&
       !SERVER_STATS_MEMBERS_ID &&
@@ -465,7 +467,6 @@ async function updateServerStats(guild) {
       return;
     }
 
-    // Fetch member cache (but safe kalau gagal)
     try {
       await guild.members.fetch();
     } catch (err) {
@@ -522,7 +523,6 @@ async function updateServerStats(guild) {
       }
     }
 
-    // Opsional: pastikan semua channel server stats berada di kategori yang sama
     if (SERVER_STATS_CATEGORY_ID) {
       const category = guild.channels.cache.get(SERVER_STATS_CATEGORY_ID);
       if (category && category.type === ChannelType.GuildCategory) {
@@ -562,7 +562,6 @@ const client = new Client({
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 
-  // Inisialisasi SERVER STATS untuk semua guild yang dipakai bot
   for (const [, guild] of c.guilds.cache) {
     await updateServerStats(guild);
   }
@@ -592,14 +591,12 @@ client.on('guildMemberAdd', async (member) => {
       }
     }
 
-    // update server stats saat ada member baru
     await updateServerStats(member.guild);
   } catch (err) {
     console.error('Error on guildMemberAdd:', err);
   }
 });
 
-// Member leave -> refresh stats
 client.on('guildMemberRemove', async (member) => {
   try {
     await updateServerStats(member.guild);
@@ -608,7 +605,6 @@ client.on('guildMemberRemove', async (member) => {
   }
 });
 
-// Guild update (misalnya jumlah boost berubah) -> refresh stats
 client.on('guildUpdate', async (oldGuild, newGuild) => {
   try {
     await updateServerStats(newGuild);
@@ -775,7 +771,6 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const { commandName } = interaction;
 
-      // Owner only helper
       const ensureOwner = async () => {
         if (!isOwner(interaction.user.id)) {
           await interaction.reply({
@@ -842,17 +837,14 @@ client.on('interactionCreate', async (interaction) => {
         const days = 30;
         const ms = days * 24 * 60 * 60 * 1000;
 
-        // pemilik key (Discord ID) – di-bind ke yang order
         const ownerDiscordId = resolveKeyOwnerDiscordId(interaction, target);
 
-        // mention channel tempat command dijalankan (idealnya channel ticket)
         const channelMention =
           interaction.channel &&
           interaction.channel.type === ChannelType.GuildText
             ? `<#${interaction.channel.id}>`
             : 'channel ticket kamu di server';
 
-        // simpan ke API sebagai "belum diredeem" (valid:false)
         try {
           await createPaidKeyOnAPI(key, 'month', ms, {
             valid: false,
@@ -887,7 +879,6 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          // Kalau tidak ada target, tampilkan langsung di reply (ephemeral)
           await interaction.reply({ content: msg, ephemeral: true });
         }
       }
@@ -900,7 +891,6 @@ client.on('interactionCreate', async (interaction) => {
         const days = 365;
         const ms = days * 24 * 60 * 60 * 1000;
 
-        // pemilik key (Discord ID) – di-bind ke yang order
         const ownerDiscordId = resolveKeyOwnerDiscordId(interaction, target);
 
         const channelMention =
@@ -1040,6 +1030,56 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
+      // /runtime
+      else if (commandName === 'runtime') {
+        const uptimeSec = Math.floor(process.uptime());
+        const startTimestampSec = Math.floor(BOT_START_TIME / 1000);
+        const nowSec = Math.floor(Date.now() / 1000);
+
+        const mem = process.memoryUsage();
+        const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
+        const toGB = (bytes) => (bytes / 1024 / 1024 / 1024).toFixed(2);
+
+        const guildCount = client.guilds.cache.size;
+
+        // Info OS / CPU / RAM dari VPS
+        const osType = os.type();
+        const osRelease = os.release();
+        const osPlatform = os.platform();
+        const osArch = os.arch();
+
+        const cpus = os.cpus() || [];
+        const coreCount = cpus.length;
+        const cpuModel = coreCount ? cpus[0].model : 'Unknown';
+        const cpuSpeed = coreCount ? cpus[0].speed : 0;
+
+        const totalMemBytes = os.totalmem();
+        const freeMemBytes = os.freemem();
+
+        const cpuLines = coreCount
+          ? `• CPU           : \`${cpuModel}\`\n` +
+            `• CPU Cores     : \`${coreCount} cores @ ${cpuSpeed} MHz\`\n`
+          : '• CPU           : `Unknown`\n';
+
+        const msg =
+          `⏱️ **Runtime Bot**\n` +
+          `• Uptime        : \`${formatSecondsToHMS(
+            uptimeSec
+          )}\` (sejak <t:${nowSec - uptimeSec}:R>)\n` +
+          `• Start Time    : <t:${startTimestampSec}:F>\n` +
+          `• Guilds        : \`${guildCount}\`\n` +
+          `• Node.js       : \`${process.version}\`\n` +
+          `• Memory (RSS)  : \`${toMB(mem.rss)} MB\`\n` +
+          `• Heap Used     : \`${toMB(mem.heapUsed)} MB\`` +
+          `\n\n🖥️ **Spesifikasi Core VPS**\n` +
+          `• OS            : \`${osType} ${osRelease} (${osPlatform}/${osArch})\`\n` +
+          cpuLines +
+          `• RAM (Total)   : \`${toGB(totalMemBytes)} GB\`\n` +
+          `• RAM (Free)    : \`${toGB(freeMemBytes)} GB\``;
+
+        await interaction.reply({ content: msg, ephemeral: true });
+      }
+
       // /mykey dan /checkmykey
       else if (commandName === 'mykey' || commandName === 'checkmykey') {
         await interaction.deferReply({ ephemeral: true });
@@ -1062,7 +1102,7 @@ client.on('interactionCreate', async (interaction) => {
             )
             .setColor(0x5865f2);
 
-          const maxShow = 10; // batasi supaya embed tidak overload
+          const maxShow = 10;
           const slice = keys.slice(0, maxShow);
 
           slice.forEach((k, idx) => {
@@ -1175,7 +1215,6 @@ client.on('interactionCreate', async (interaction) => {
           },
         ];
 
-        // semua OWNER_ID yang benar-benar ada di guild dapat akses ticket
         for (const ownerIdRaw of OWNER_IDS) {
           const id = String(ownerIdRaw).trim();
           if (!id || id === interaction.user.id) continue;
@@ -1211,7 +1250,6 @@ client.on('interactionCreate', async (interaction) => {
 
         await sendTicketIntroMessage(channel, interaction.user);
 
-        // log
         const logEmbed = new EmbedBuilder()
           .setTitle('🎫 Ticket Baru Dibuat')
           .addFields(
@@ -1228,7 +1266,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // cancel order (user pemilik channel)
+      // cancel order
       if (customId === 'ticket_cancel') {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -1255,7 +1293,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // close ticket (khusus owner / staff dengan ManageChannels)
+      // close ticket
       if (customId === 'ticket_close') {
         const member = await interaction.guild.members.fetch(
           interaction.user.id
@@ -1285,7 +1323,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // tombol "Input Username Lagi" (gagal / salah)
+      // tombol "Input Username Lagi"
       if (customId === 'roblox_reinput' || customId === 'roblox_wrong') {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -1317,7 +1355,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // tombol "Ya, Benar!" confirm username
+      // tombol "Ya, Benar!"
       if (customId.startsWith('roblox_confirm_')) {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -1699,7 +1737,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // CEK TIPE KEY: HARUS 'month'
           const keyType = normalizeKeyType(info.type || '');
           if (!keyType) {
             await interaction.editReply({
@@ -1719,7 +1756,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // CEK PEMILIK KEY: harus sama dengan akun Discord yang redeem
           if (
             info.ownerDiscordId &&
             String(info.ownerDiscordId) !== interaction.user.id
@@ -1732,13 +1768,10 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // Kalau belum ada ownerDiscordId (key lama / manual), bind ke user ini
           const ownerDiscordId = info.ownerDiscordId
             ? String(info.ownerDiscordId)
             : interaction.user.id;
 
-          // Di titik ini: key ada, belum expired, belum deleted, valid=false, tipe=month, owner cocok
-          // -> anggap redeem pertama, update ke valid:true
           try {
             await createPaidKeyOnAPI(key, keyType, null, {
               valid: true,
@@ -1824,7 +1857,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // CEK TIPE KEY: HARUS 'lifetime'
           const keyType = normalizeKeyType(info.type || '');
           if (!keyType) {
             await interaction.editReply({
@@ -1844,7 +1876,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          // CEK PEMILIK KEY
           if (
             info.ownerDiscordId &&
             String(info.ownerDiscordId) !== interaction.user.id
@@ -1861,7 +1892,6 @@ client.on('interactionCreate', async (interaction) => {
             ? String(info.ownerDiscordId)
             : interaction.user.id;
 
-          // Redeem pertama -> set valid:true di API
           try {
             await createPaidKeyOnAPI(key, keyType, null, {
               valid: true,
@@ -2011,6 +2041,9 @@ const commands = [
         .setDescription('Channel tempat pesan reaction role (optional)')
         .setRequired(false)
     ),
+  new SlashCommandBuilder()
+    .setName('runtime')
+    .setDescription('Lihat runtime & spesifikasi core VPS untuk bot ini'),
   new SlashCommandBuilder()
     .setName('mykey')
     .setDescription('Lihat semua paid key yang terikat ke akun Discord kamu'),
