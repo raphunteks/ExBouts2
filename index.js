@@ -1026,33 +1026,82 @@ client.on('interactionCreate', async (interaction) => {
       else if (commandName === 'sendreactionrole') {
         if (!(await ensureOwner())) return;
 
-        const configText = interaction.options.getString('config', true);
+        const rawConfigText = interaction.options.getString('config', true);
         const channelsText = interaction.options.getString('channels', false);
-        const contentText =
+
+        // default content
+        let contentText =
           interaction.options.getString('content', false) ||
           'React dengan emoji berikut untuk mendapatkan role:';
 
-        const lines = configText
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
+        // Support inline content pakai "#", contoh:
+        // 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Let's verify
+        let configText = rawConfigText;
+        const hashIdx = rawConfigText.indexOf('#');
+        if (hashIdx !== -1) {
+          configText = rawConfigText.slice(0, hashIdx).trim();
+          const inlineContent = rawConfigText.slice(hashIdx + 1).trim();
+          if (inlineContent) {
+            contentText = inlineContent;
+          }
+        } else {
+          configText = rawConfigText.trim();
+        }
+
+        if (!configText) {
+          await interaction.reply({
+            content:
+              'Config kosong. Contoh: `🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Mode 1 (lama): ada newline → tiap baris 1 pasangan
+        // Mode 2 (baru): tanpa newline → pasangan dipisah koma
+        let segments;
+        if (configText.includes('\n')) {
+          segments = configText
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+        } else {
+          segments = configText
+            .split(',')
+            .map((l) => l.trim())
+            .filter(Boolean);
+        }
 
         const parsed = [];
         const errors = [];
 
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const idx = line.indexOf(';') !== -1 ? line.indexOf(';') : line.indexOf(',');
-          if (idx === -1) {
-            errors.push(`Baris ${i + 1}: format harus \`emoji ; @Role\`.`);
+        for (let i = 0; i < segments.length; i++) {
+          const part = segments[i];
+          if (!part) continue;
+
+          // Di dalam 1 pasangan, pisah emoji dan role pakai ";"
+          // (tetap support format lama "emoji , role" kalau mode newline).
+          let sepIdx = part.indexOf(';');
+
+          if (sepIdx === -1 && configText.includes('\n')) {
+            // fallback kompatibilitas lama: boleh pakai koma di dalam baris
+            sepIdx = part.indexOf(',');
+          }
+
+          if (sepIdx === -1) {
+            errors.push(
+              `Bagian ${i + 1}: format harus \`emoji ; @Role\`. Contoh: 🇮🇩 ; @MemberID`
+            );
             continue;
           }
 
-          const emojiPart = line.slice(0, idx).trim();
-          const rolePart = line.slice(idx + 1).trim();
+          const emojiPart = part.slice(0, sepIdx).trim();
+          const rolePart = part.slice(sepIdx + 1).trim();
 
           if (!emojiPart || !rolePart) {
-            errors.push(`Baris ${i + 1}: format harus \`emoji ; @Role\`.`);
+            errors.push(
+              `Bagian ${i + 1}: format harus \`emoji ; @Role\`. Contoh: 🇺🇸 ; @MemberEN`
+            );
             continue;
           }
 
@@ -1072,13 +1121,17 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           if (!roleId) {
-            errors.push(`Baris ${i + 1}: role "${rolePart}" tidak ditemukan.`);
+            errors.push(
+              `Bagian ${i + 1}: role "${rolePart}" tidak ditemukan di server.`
+            );
             continue;
           }
 
           const role = interaction.guild.roles.cache.get(roleId);
           if (!role) {
-            errors.push(`Baris ${i + 1}: role ID ${roleId} tidak valid.`);
+            errors.push(
+              `Bagian ${i + 1}: role ID ${roleId} tidak valid / tidak ada.`
+            );
             continue;
           }
 
@@ -1092,7 +1145,8 @@ client.on('interactionCreate', async (interaction) => {
         if (!parsed.length) {
           await interaction.reply({
             content:
-              'Tidak ada pasangan emoji–role yang valid. Pastikan format setiap baris: `emoji ; @Role`.',
+              'Tidak ada pasangan emoji–role yang valid.\n' +
+              'Contoh penggunaan: `/sendreactionrole config: 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
             ephemeral: true,
           });
           return;
@@ -1172,8 +1226,11 @@ client.on('interactionCreate', async (interaction) => {
         let replyText = `Reaction role dibuat di ${uniqueChannels.join(', ')}.`;
         if (errors.length) {
           replyText +=
-            '\n\nBeberapa baris dilewati karena error:\n' +
-            errors.slice(0, 5).map((e) => `• ${e}`).join('\n');
+            '\n\nBeberapa bagian dilewati karena error:\n' +
+            errors
+              .slice(0, 5)
+              .map((e) => `• ${e}`)
+              .join('\n');
         }
 
         await interaction.editReply({ content: replyText });
@@ -2174,7 +2231,9 @@ const commands = [
     .addStringOption((opt) =>
       opt
         .setName('config')
-        .setDescription('Daftar emoji & role per baris, contoh: "✅ ; @Member"')
+        .setDescription(
+          'Daftar emoji & role (pisah baris / koma). Contoh: "🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #Pesan"'
+        )
         .setRequired(true)
     )
     .addStringOption((opt) =>
@@ -2186,7 +2245,7 @@ const commands = [
     .addStringOption((opt) =>
       opt
         .setName('content')
-        .setDescription('Pesan yang dikirim sebelum daftar emoji (optional)')
+        .setDescription('Pesan yang dikirim sebelum daftar emoji (optional, override # di config)')
         .setRequired(false)
     ),
   new SlashCommandBuilder()
