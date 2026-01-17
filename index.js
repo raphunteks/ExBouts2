@@ -94,7 +94,7 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 // ticketOwners: channelId -> userId
 const ticketOwners = new Map();
 
-// reactionRoles: messageId -> [ { emoji, roleId } ]
+// reaction role: messageId -> array { emoji, roleId }
 const reactionRoles = new Map();
 
 // ---------- HELPER UTILS ---------------------------------------
@@ -345,8 +345,6 @@ async function fetchUserPaidKeys(discordUser) {
         (k.info && k.info.ownerDiscordId) ||
         null;
 
-      // Kalau backend sudah filter per-discordId, ini boleh kosong.
-      // Kalau ada dan beda user, skip.
       if (
         ownerDiscordId &&
         String(ownerDiscordId) !== String(discordUser.id)
@@ -450,126 +448,6 @@ async function logOrder(guild, embed) {
   } catch (err) {
     console.error('Failed to send log order:', err);
   }
-}
-
-// ---------- REACTION ROLE PARSER --------------------------------
-
-function resolveRoleFromText(guild, text) {
-  if (!guild || !text) return null;
-  const raw = text.trim();
-
-  // Mention <@&id>
-  const m = raw.match(/<@&(\d+)>/);
-  if (m) {
-    const role = guild.roles.cache.get(m[1]);
-    if (role) return role;
-  }
-
-  // Pure ID
-  if (/^\d{17,20}$/.test(raw)) {
-    const role = guild.roles.cache.get(raw);
-    if (role) return role;
-  }
-
-  // By name (case-insensitive)
-  const lower = raw.toLowerCase();
-  const roleByName = guild.roles.cache.find(
-    (r) => r.name.toLowerCase() === lower
-  );
-  if (roleByName) return roleByName;
-
-  return null;
-}
-
-/**
- * Parse config multi-line:
- *  "✅ ; @Member"
- *  "🎮 @Gamer"
- *  "⭐ | VIP"
- * return { pairs: [{emoji, role}], errors: [string] }
- */
-function parseReactionRoleConfig(guild, raw) {
-  const pairs = [];
-  const errors = [];
-  if (!raw) return { pairs, errors };
-
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-
-  let lineNo = 0;
-  for (const line of lines) {
-    lineNo += 1;
-
-    // Pisahkan emoji & role
-    let emojiPart;
-    let rolePart;
-
-    const sepMatch = line.match(/^(\S+)\s*(?:[,;|]\s*|\s+)(.+)$/);
-    if (sepMatch) {
-      emojiPart = sepMatch[1];
-      rolePart = sepMatch[2];
-    } else {
-      errors.push(`Baris ${lineNo}: format tidak dikenali ("${line}"). Gunakan "emoji ; role".`);
-      continue;
-    }
-
-    const role = resolveRoleFromText(guild, rolePart);
-    if (!role) {
-      errors.push(`Baris ${lineNo}: role "${rolePart}" tidak ditemukan di server.`);
-      continue;
-    }
-
-    pairs.push({ emoji: emojiPart, role });
-  }
-
-  return { pairs, errors };
-}
-
-/**
- * Parse channels string: "#chan1 #chan2" atau "id1, id2"
- * return array of Text/Announcement channels
- */
-function parseReactionTargetChannels(guild, raw, fallbackChannel) {
-  const results = [];
-  const idSet = new Set();
-
-  if (raw) {
-    let m;
-    const mentionRegex = /<#(\d+)>/g;
-    while ((m = mentionRegex.exec(raw)) !== null) {
-      idSet.add(m[1]);
-    }
-
-    const tokens = raw.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
-    for (const t of tokens) {
-      if (/^\d{17,20}$/.test(t)) {
-        idSet.add(t);
-      }
-    }
-  }
-
-  for (const id of idSet) {
-    const ch = guild.channels.cache.get(id);
-    if (!ch) continue;
-    if (
-      ch.type === ChannelType.GuildText ||
-      ch.type === ChannelType.GuildAnnouncement
-    ) {
-      results.push(ch);
-    }
-  }
-
-  if (
-    !results.length &&
-    fallbackChannel &&
-    fallbackChannel.guild &&
-    fallbackChannel.guild.id === guild.id &&
-    (fallbackChannel.type === ChannelType.GuildText ||
-      fallbackChannel.type === ChannelType.GuildAnnouncement)
-  ) {
-    results.push(fallbackChannel);
-  }
-
-  return results;
 }
 
 // ---------- SERVER STATS HELPER --------------------------------
@@ -733,23 +611,33 @@ client.on('guildUpdate', async (oldGuild, newGuild) => {
   }
 });
 
-// Reaction role multi
+// Reaction role (multi)
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch();
 
     const conf = reactionRoles.get(reaction.message.id);
-    if (!conf || !Array.isArray(conf) || !conf.length) return;
+    if (!conf) return;
 
     const emojiStr = reaction.emoji.toString();
-    const pair = conf.find((p) => p.emoji === emojiStr);
-    if (!pair) return;
+    let roleId = null;
+
+    if (Array.isArray(conf)) {
+      const found = conf.find((c) => c.emoji === emojiStr);
+      if (found) roleId = found.roleId;
+    } else if (conf.emoji === emojiStr) {
+      // fallback kalau ada config lama
+      roleId = conf.roleId;
+    }
+
+    if (!roleId) return;
 
     const guild = reaction.message.guild;
     if (!guild) return;
+
     const member = await guild.members.fetch(user.id);
-    await member.roles.add(pair.roleId).catch(() => {});
+    await member.roles.add(roleId).catch(() => {});
   } catch (err) {
     console.error('messageReactionAdd error:', err);
   }
@@ -761,16 +649,25 @@ client.on('messageReactionRemove', async (reaction, user) => {
     if (reaction.partial) await reaction.fetch();
 
     const conf = reactionRoles.get(reaction.message.id);
-    if (!conf || !Array.isArray(conf) || !conf.length) return;
+    if (!conf) return;
 
     const emojiStr = reaction.emoji.toString();
-    const pair = conf.find((p) => p.emoji === emojiStr);
-    if (!pair) return;
+    let roleId = null;
+
+    if (Array.isArray(conf)) {
+      const found = conf.find((c) => c.emoji === emojiStr);
+      if (found) roleId = found.roleId;
+    } else if (conf.emoji === emojiStr) {
+      roleId = conf.roleId;
+    }
+
+    if (!roleId) return;
 
     const guild = reaction.message.guild;
     if (!guild) return;
+
     const member = await guild.members.fetch(user.id);
-    await member.roles.remove(pair.roleId).catch(() => {});
+    await member.roles.remove(roleId).catch(() => {});
   } catch (err) {
     console.error('messageReactionRemove error:', err);
   }
@@ -1125,106 +1022,161 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      // /sendreactionrole (multi-role, multi-emoji, multi-channel)
+      // /sendreactionrole (multi role, multi emoji, multi channel)
       else if (commandName === 'sendreactionrole') {
         if (!(await ensureOwner())) return;
 
-        if (!interaction.guild) {
-          await interaction.reply({
-            content: 'Perintah ini hanya bisa digunakan di dalam server.',
-            ephemeral: true,
+        const configText = interaction.options.getString('config', true);
+        const channelsText = interaction.options.getString('channels', false);
+        const contentText =
+          interaction.options.getString('content', false) ||
+          'React dengan emoji berikut untuk mendapatkan role:';
+
+        const lines = configText
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+
+        const parsed = [];
+        const errors = [];
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const idx = line.indexOf(';') !== -1 ? line.indexOf(';') : line.indexOf(',');
+          if (idx === -1) {
+            errors.push(`Baris ${i + 1}: format harus \`emoji ; @Role\`.`);
+            continue;
+          }
+
+          const emojiPart = line.slice(0, idx).trim();
+          const rolePart = line.slice(idx + 1).trim();
+
+          if (!emojiPart || !rolePart) {
+            errors.push(`Baris ${i + 1}: format harus \`emoji ; @Role\`.`);
+            continue;
+          }
+
+          let roleId = null;
+          const mentionMatch = rolePart.match(/^<@&(\d+)>$/);
+          if (mentionMatch) {
+            roleId = mentionMatch[1];
+          } else if (/^\d{5,}$/.test(rolePart)) {
+            roleId = rolePart;
+          } else {
+            const roleByName = interaction.guild.roles.cache.find(
+              (r) => r.name.toLowerCase() === rolePart.toLowerCase()
+            );
+            if (roleByName) {
+              roleId = roleByName.id;
+            }
+          }
+
+          if (!roleId) {
+            errors.push(`Baris ${i + 1}: role "${rolePart}" tidak ditemukan.`);
+            continue;
+          }
+
+          const role = interaction.guild.roles.cache.get(roleId);
+          if (!role) {
+            errors.push(`Baris ${i + 1}: role ID ${roleId} tidak valid.`);
+            continue;
+          }
+
+          parsed.push({
+            emoji: emojiPart,
+            roleId: role.id,
+            roleName: role.name,
           });
-          return;
         }
 
-        const title = interaction.options.getString('title', true);
-        const configRaw = interaction.options.getString('config', true);
-        const channelsRaw = interaction.options.getString('channels', false) || '';
-
-        const guild = interaction.guild;
-
-        const { pairs, errors } = parseReactionRoleConfig(guild, configRaw);
-
-        if (!pairs.length) {
+        if (!parsed.length) {
           await interaction.reply({
             content:
-              'Config reaction-role kosong / tidak valid. Pastikan format satu baris: `emoji ; @Role`.',
+              'Tidak ada pasangan emoji–role yang valid. Pastikan format setiap baris: `emoji ; @Role`.',
             ephemeral: true,
           });
           return;
         }
 
-        const targetChannels = parseReactionTargetChannels(
-          guild,
-          channelsRaw,
-          interaction.channel
-        );
+        const targetChannels = [];
+        if (channelsText) {
+          const tokens = channelsText
+            .split(/[,\s]+/)
+            .map((t) => t.trim())
+            .filter(Boolean);
+          const seen = new Set();
+
+          for (const token of tokens) {
+            let id = token;
+            const m = token.match(/^<#(\d+)>$/);
+            if (m) id = m[1];
+            if (!/^\d{5,}$/.test(id)) continue;
+            if (seen.has(id)) continue;
+            const ch = interaction.guild.channels.cache.get(id);
+            if (!ch || ch.type !== ChannelType.GuildText) continue;
+            seen.add(id);
+            targetChannels.push(ch);
+          }
+        }
 
         if (!targetChannels.length) {
-          await interaction.reply({
-            content:
-              'Tidak ada channel teks valid yang ditemukan. Pastikan menyebut channel dengan mention atau ID.',
-            ephemeral: true,
-          });
-          return;
+          if (!interaction.channel || interaction.channel.type !== ChannelType.GuildText) {
+            await interaction.reply({
+              content:
+                'Tidak ada channel valid dan perintah tidak dijalankan di text channel. Periksa opsi `channels`.',
+              ephemeral: true,
+            });
+            return;
+          }
+          targetChannels.push(interaction.channel);
         }
 
         await interaction.deferReply({ ephemeral: true });
 
-        const results = [];
+        const createdMessages = [];
+        const embedDescription = parsed
+          .map((p) => `${p.emoji} → <@&${p.roleId}>`)
+          .join('\n');
 
         for (const ch of targetChannels) {
-          try {
-            const listText = pairs
-              .map((p) => `${p.emoji} → ${p.role}`)
-              .join('\n');
+          const embed = new EmbedBuilder()
+            .setTitle('Reaction Role')
+            .setDescription(embedDescription)
+            .setColor(0x5865f2);
 
-            const embed = new EmbedBuilder()
-              .setTitle(title)
-              .setDescription(
-                'React dengan emoji berikut untuk mendapatkan / melepas role:\n\n' +
-                  listText
-              )
-              .setColor(0x5865f2);
+          const msg = await ch.send({
+            content: contentText,
+            embeds: [embed],
+          });
 
-            const msg = await ch.send({ embeds: [embed] });
+          createdMessages.push(msg);
 
-            for (const p of pairs) {
-              try {
-                await msg.react(p.emoji);
-              } catch (errReact) {
-                console.error(
-                  `Gagal react ${p.emoji} di channel ${ch.id}:`,
-                  errReact
-                );
-              }
+          for (const p of parsed) {
+            try {
+              await msg.react(p.emoji);
+            } catch (err) {
+              console.error('Gagal menambahkan reaction pada pesan:', err);
             }
-
-            const storedPairs = pairs.map((p) => ({
-              emoji: p.emoji,
-              roleId: p.role.id,
-            }));
-            reactionRoles.set(msg.id, storedPairs);
-
-            results.push(`✅ Berhasil kirim reaction-role di ${ch}`);
-          } catch (errCh) {
-            console.error('Gagal kirim reaction-role di channel:', ch.id, errCh);
-            results.push(
-              `❌ Gagal kirim reaction-role di ${ch} (${errCh.message || 'unknown error'})`
-            );
           }
+
+          reactionRoles.set(
+            msg.id,
+            parsed.map((p) => ({ emoji: p.emoji, roleId: p.roleId }))
+          );
         }
 
-        let msgResult = results.join('\n');
+        const uniqueChannels = [
+          ...new Set(createdMessages.map((m) => `<#${m.channel.id}>`)),
+        ];
+
+        let replyText = `Reaction role dibuat di ${uniqueChannels.join(', ')}.`;
         if (errors.length) {
-          msgResult +=
-            '\n\n⚠️ Beberapa baris config di-skip karena error:\n- ' +
-            errors.join('\n- ');
+          replyText +=
+            '\n\nBeberapa baris dilewati karena error:\n' +
+            errors.slice(0, 5).map((e) => `• ${e}`).join('\n');
         }
 
-        await interaction.editReply({
-          content: msgResult,
-        });
+        await interaction.editReply({ content: replyText });
       }
 
       // /runtime
@@ -1239,7 +1191,6 @@ client.on('interactionCreate', async (interaction) => {
 
         const guildCount = client.guilds.cache.size;
 
-        // Info OS / CPU / RAM dari VPS
         const osType = os.type();
         const osRelease = os.release();
         const osPlatform = os.platform();
@@ -2222,22 +2173,20 @@ const commands = [
     .setDescription('Kirim pesan reaction role (multi role, multi emoji, multi channel)')
     .addStringOption((opt) =>
       opt
-        .setName('title')
-        .setDescription('Judul / teks utama pesan reaction role')
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
         .setName('config')
-        .setDescription('Daftar emoji & role per baris. Contoh: "✅ ; @Member"')
+        .setDescription('Daftar emoji & role per baris, contoh: "✅ ; @Member"')
         .setRequired(true)
     )
     .addStringOption((opt) =>
       opt
         .setName('channels')
-        .setDescription(
-          'Daftar channel tujuan (mention atau ID, pisahkan dengan spasi/koma). Kosongkan untuk pakai channel ini.'
-        )
+        .setDescription('Channel (mention/ID, pisah spasi/koma). Kosongkan = channel ini.')
+        .setRequired(false)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('content')
+        .setDescription('Pesan yang dikirim sebelum daftar emoji (optional)')
         .setRequired(false)
     ),
   new SlashCommandBuilder()
