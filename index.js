@@ -58,6 +58,11 @@ const CHANNEL_LOGORDER_ID = process.env.CHANNEL_LOGORDER_ID || null;
 // welcome channel (bisa juga diubah via /setwelcomechannel)
 let welcomeChannelId = process.env.WELCOME_CHANNEL_ID || null;
 
+// role premium untuk Claim Role
+const PAID_ROLE_ID = process.env.PAID_ROLE_ID || null;
+// channel order-paid untuk pesan error Claim Role
+const ORDER_PAID_CHANNEL_ID = process.env.ORDER_PAID_CHANNEL_ID || null;
+
 // URL dasar validasi key (default ke API kamu)
 const PAIDKEY_VALIDATE_BASE =
   process.env.PAIDKEY_VALIDATE_BASE ||
@@ -68,7 +73,7 @@ const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
   'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
-// endpoint untuk ambil semua key milik user (dipakai /mykey) – versi PAID+FREE
+// endpoint untuk ambil semua key + stats milik user (paid + free)
 const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
@@ -131,7 +136,7 @@ function formatSecondsToHMS(sec) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-// Pesan runtime dipakai /runtime dan tombol panel kontrol
+// Pesan runtime dipakai /runtime
 function buildRuntimeMessage(client) {
   const uptimeSec = Math.floor(process.uptime());
   const startTimestampSec = Math.floor(BOT_START_TIME / 1000);
@@ -189,7 +194,9 @@ function normalizeKeyType(raw) {
     return 'month';
   }
 
-  if (['lifetime', 'life', 'selamanya', 'permanent', 'permanentkey'].includes(t)) {
+  if (
+    ['lifetime', 'life', 'selamanya', 'permanent', 'permanentkey'].includes(t)
+  ) {
     return 'lifetime';
   }
 
@@ -224,7 +231,7 @@ function resolveKeyOwnerDiscordId(interaction, targetUser) {
   return String(interaction.user.id);
 }
 
-// Call API untuk cek key
+// Call API untuk cek key individual (paid key endpoint)
 async function validatePaidKey(key) {
   const base = PAIDKEY_VALIDATE_BASE.replace(/\/$/, '');
   const url = `${base}/${encodeURIComponent(key)}`;
@@ -299,12 +306,25 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
 // helper konversi ke ms (aman untuk number/string/null)
 function toMs(value) {
   if (value === null || value === undefined) return null;
-  const n = typeof value === 'number' ? value : parseInt(value, 10);
+  if (typeof value === 'number') return value;
+  const n = parseInt(value, 10);
   return Number.isNaN(n) ? null : n;
 }
 
-// Ambil semua PAID key milik user dari API /api/paidfree/user-info (dipakai /mykey)
-async function fetchUserPaidKeys(discordUser) {
+function toNumber(value) {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isNaN(n) ? null : n;
+}
+
+/**
+ * Ambil semua key (paid + free) dan stats milik user dari /api/paidfree/user-info
+ * Return: { paidKeys, freeKeys, allKeys, raw, stats }
+ * - paidKeys/freeKeys/allKeys: array objek normalized:
+ *   { token, type, provider, createdAtMs, expiresAfterMs, deleted, valid, expired, status, ownerDiscordId }
+ * - stats: { totalExec, lastExecAtMs, executorName, subscription, totalClaimed, lastClaimAtMs }
+ */
+async function fetchUserKeyInfo(discordUser) {
   if (!EXHUB_USERINFO_URL) {
     throw new Error('EXHUB_USERINFO_URL belum dikonfigurasi.');
   }
@@ -325,19 +345,19 @@ async function fetchUserPaidKeys(discordUser) {
       data = JSON.parse(text);
     } catch (e) {
       console.log(
-        '[DEBUG /mykey] Gagal parse JSON dari user-info:',
+        '[DEBUG user-info] Gagal parse JSON dari user-info:',
         e,
         text.slice(0, 200)
       );
-      return [];
+      return { paidKeys: [], freeKeys: [], allKeys: [], raw: null, stats: {} };
     }
 
     if (!data || !Array.isArray(data.keys)) {
       console.log(
-        '[DEBUG /mykey] Tidak menemukan array key di response user-info. URL =',
+        '[DEBUG user-info] Tidak menemukan array key di response user-info. URL =',
         EXHUB_USERINFO_URL
       );
-      return [];
+      return { paidKeys: [], freeKeys: [], allKeys: [], raw: data, stats: {} };
     }
 
     const now = Date.now();
@@ -364,12 +384,17 @@ async function fetchUserPaidKeys(discordUser) {
     }
 
     const uniqKeys = Array.from(byToken.values());
+
+    const allKeys = [];
     const paidKeys = [];
+    const freeKeys = [];
 
     for (const k of uniqKeys) {
       if (!k) continue;
 
       const providerRaw = String(k.provider || k.source || '').toLowerCase();
+      const providerLabel = providerRaw || 'unknown';
+
       const tierRaw =
         k.tier ||
         k.type ||
@@ -377,15 +402,12 @@ async function fetchUserPaidKeys(discordUser) {
         '';
       const typeNorm = normalizeKeyType(tierRaw);
 
-      // filter free key
       const isFree =
         typeNorm === 'free' ||
         providerRaw === 'work.ink' ||
         providerRaw === 'workink' ||
         providerRaw.includes('linkvertise') ||
         k.free === true;
-
-      if (isFree) continue;
 
       let token =
         k.token ||
@@ -401,13 +423,6 @@ async function fetchUserPaidKeys(discordUser) {
         k.ownerDiscordId ||
         (k.info && k.info.ownerDiscordId) ||
         null;
-
-      if (
-        ownerDiscordId &&
-        String(ownerDiscordId) !== String(discordUser.id)
-      ) {
-        continue;
-      }
 
       const createdAtMs =
         toMs(k.createdAt) ||
@@ -438,30 +453,130 @@ async function fetchUserPaidKeys(discordUser) {
       else if (!valid) status = 'Not Redeemed';
       else status = 'Active';
 
-      paidKeys.push({
+      const norm = {
         token,
-        type: typeNorm || 'paid',
+        type: typeNorm || (isFree ? 'free' : 'paid'),
+        provider: providerLabel,
         createdAtMs,
         expiresAfterMs,
+        deleted,
+        valid,
+        expired,
         status,
-      });
+        ownerDiscordId: ownerDiscordId ? String(ownerDiscordId) : null,
+      };
+
+      allKeys.push(norm);
+      if (isFree) freeKeys.push(norm);
+      else paidKeys.push(norm);
     }
 
-    paidKeys.sort((a, b) => {
-      const ca = a.createdAtMs || 0;
-      const cb = b.createdAtMs || 0;
-      return ca - cb;
-    });
+    // ----- Stats -----
+    const stats = {};
+    const s = data.stats || data.execStats || data.usage || {};
+
+    const totalExecCandidates = [
+      data.totalExec,
+      data.totalExecutions,
+      data.totalUses,
+      s.totalExec,
+      s.totalExecutions,
+      s.totalUses,
+      s.total,
+    ];
+    let totalExec = null;
+    for (const v of totalExecCandidates) {
+      const n = toNumber(v);
+      if (n !== null) {
+        totalExec = n;
+        break;
+      }
+    }
+
+    const lastExecMsCandidates = [
+      data.lastExecAt,
+      data.lastExecutionAt,
+      data.lastUseAt,
+      data.lastUsedAt,
+      s.lastExecAt,
+      s.lastExecutionAt,
+      s.lastUseAt,
+      s.lastUsedAt,
+    ];
+    let lastExecAtMs = null;
+    for (const v of lastExecMsCandidates) {
+      const ms = toMs(v);
+      if (ms !== null) {
+        lastExecAtMs = ms;
+        break;
+      }
+    }
+
+    const executorName =
+      data.executor ||
+      data.lastExecutor ||
+      (s && (s.executor || s.lastExecutor)) ||
+      null;
+
+    const subscription =
+      data.subscription ||
+      (data.profile && data.profile.subscription) ||
+      data.plan ||
+      null;
+
+    const totalClaimedCandidates = [
+      data.totalClaimed,
+      s.totalClaimed,
+      s.claimed,
+    ];
+    let totalClaimed = null;
+    for (const v of totalClaimedCandidates) {
+      const n = toNumber(v);
+      if (n !== null) {
+        totalClaimed = n;
+        break;
+      }
+    }
+
+    const lastClaimMsCandidates = [
+      data.lastClaimedAt,
+      data.lastClaimAt,
+      s.lastClaimedAt,
+      s.lastClaimAt,
+    ];
+    let lastClaimAtMs = null;
+    for (const v of lastClaimMsCandidates) {
+      const ms = toMs(v);
+      if (ms !== null) {
+        lastClaimAtMs = ms;
+        break;
+      }
+    }
+
+    stats.totalExec = totalExec;
+    stats.lastExecAtMs = lastExecAtMs;
+    stats.executorName = executorName;
+    stats.subscription = subscription;
+    stats.totalClaimed = totalClaimed;
+    stats.lastClaimAtMs = lastClaimAtMs;
 
     console.log(
-      `[DEBUG /mykey] Discord ${discordUser.id} - total paidKeys = ${paidKeys.length}`
+      `[DEBUG user-info] Discord ${discordUser.id} – keys=${allKeys.length}, paid=${paidKeys.length}, free=${freeKeys.length}, totalExec=${
+        stats.totalExec ?? 'NA'
+      }`
     );
 
-    return paidKeys;
+    return { paidKeys, freeKeys, allKeys, raw: data, stats };
   } catch (err) {
-    console.log('[DEBUG /mykey] Error call user-info:', err);
-    return [];
+    console.log('[DEBUG user-info] Error call user-info:', err);
+    return { paidKeys: [], freeKeys: [], allKeys: [], raw: null, stats: {} };
   }
+}
+
+// wrapper lama untuk /mykey (paid only)
+async function fetchUserPaidKeys(discordUser) {
+  const info = await fetchUserKeyInfo(discordUser);
+  return info.paidKeys;
 }
 
 // lookup username Roblox -> { id, name, displayName }
@@ -511,19 +626,17 @@ async function logOrder(guild, embed) {
 
 /**
  * Generate Buffer PNG kartu welcome (avatar + background + teks)
- * Mirip contoh: avatar lingkaran di tengah, teks WELCOME dan username di bawah.
  * @param {import('discord.js').GuildMember} member
  * @returns {Promise<Buffer>}
  */
 async function generateWelcomeCard(member) {
-  // Sesuaikan dengan ukuran background-mu (ini kira-kira ratio contoh)
   const width = 1262;
   const height = 576;
 
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
 
-  // 1) Background
+  // Background
   if (WELCOME_CARD_BG_URL) {
     try {
       const bg = await loadImage(WELCOME_CARD_BG_URL);
@@ -538,7 +651,7 @@ async function generateWelcomeCard(member) {
     ctx.fillRect(0, 0, width, height);
   }
 
-  // 2) Avatar lingkaran
+  // Avatar lingkaran
   const avatarUrl = member.user.displayAvatarURL({
     extension: 'png',
     size: 512,
@@ -554,7 +667,7 @@ async function generateWelcomeCard(member) {
 
   const avatarRadius = 150;
   const avatarX = width / 2;
-  const avatarY = height * 0.33; // agak ke atas
+  const avatarY = height * 0.33;
 
   if (avatar) {
     ctx.save();
@@ -562,7 +675,6 @@ async function generateWelcomeCard(member) {
     ctx.arc(avatarX, avatarY, avatarRadius, 0, Math.PI * 2, true);
     ctx.closePath();
     ctx.clip();
-
     ctx.drawImage(
       avatar,
       avatarX - avatarRadius,
@@ -580,7 +692,7 @@ async function generateWelcomeCard(member) {
   ctx.strokeStyle = '#2196f3';
   ctx.stroke();
 
-  // 3) Teks "WELCOME"
+  // Teks "WELCOME"
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
@@ -594,7 +706,7 @@ async function generateWelcomeCard(member) {
   const welcomeTextY = avatarY + avatarRadius + 80;
   ctx.fillText('WELCOME', width / 2, welcomeTextY);
 
-  // 4) Teks Username di bawahnya
+  // Username
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 10;
 
@@ -602,7 +714,6 @@ async function generateWelcomeCard(member) {
     member.user.globalName || member.user.username || 'NEW MEMBER';
   const username = baseUsername.toUpperCase();
 
-  // auto shrink font kalau username terlalu panjang
   let fontSize = 54;
   ctx.font = `bold ${fontSize}px Sans-Serif`;
   let measured = ctx.measureText(username);
@@ -624,7 +735,6 @@ async function generateWelcomeCard(member) {
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
 
-  // 5) Encode ke PNG
   const buffer = await canvas.encode('png');
   return buffer;
 }
@@ -648,7 +758,7 @@ async function updateServerStats(guild) {
       await guild.members.fetch();
     } catch (err) {
       console.warn(
-        '[SERVER STATS] guild.members.fetch() error (boleh diabaikan kalau tidak punya Server Members Intent):',
+        '[SERVER STATS] guild.members.fetch() error:',
         err.message
       );
     }
@@ -821,7 +931,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
       const found = conf.find((c) => c.emoji === emojiStr);
       if (found) roleId = found.roleId;
     } else if (conf.emoji === emojiStr) {
-      // fallback kalau ada config lama
       roleId = conf.roleId;
     }
 
@@ -1292,7 +1401,7 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      // /sendreactionrole (multi role, multi emoji, multi channel)
+      // /sendreactionrole
       else if (commandName === 'sendreactionrole') {
         if (!(await ensureOwner())) return;
 
@@ -1304,8 +1413,7 @@ client.on('interactionCreate', async (interaction) => {
           interaction.options.getString('content', false) ||
           'React dengan emoji berikut untuk mendapatkan role:';
 
-        // Support inline content pakai "#", contoh:
-        // 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Let's verify
+        // Support inline content pakai "#"
         let configText = rawConfigText;
         const hashIdx = rawConfigText.indexOf('#');
         if (hashIdx !== -1) {
@@ -1327,8 +1435,6 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        // Mode 1 (lama): ada newline → tiap baris 1 pasangan
-        // Mode 2 (baru): tanpa newline → pasangan dipisah koma
         let segments;
         if (configText.includes('\n')) {
           segments = configText
@@ -1349,12 +1455,9 @@ client.on('interactionCreate', async (interaction) => {
           const part = segments[i];
           if (!part) continue;
 
-          // Di dalam 1 pasangan, pisah emoji dan role pakai ";"
-          // (tetap support format lama "emoji , role" kalau mode newline).
           let sepIdx = part.indexOf(';');
 
           if (sepIdx === -1 && configText.includes('\n')) {
-            // fallback kompatibilitas lama: boleh pakai koma di dalam baris
             sepIdx = part.indexOf(',');
           }
 
@@ -1444,7 +1547,10 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (!targetChannels.length) {
-          if (!interaction.channel || interaction.channel.type !== ChannelType.GuildText) {
+          if (
+            !interaction.channel ||
+            interaction.channel.type !== ChannelType.GuildText
+          ) {
             await interaction.reply({
               content:
                 'Tidak ada channel valid dan perintah tidak dijalankan di text channel. Periksa opsi `channels`.',
@@ -1512,7 +1618,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ content: msg, ephemeral: true });
       }
 
-      // /mykey dan /checkmykey
+      // /mykey dan /checkmykey (paid only)
       else if (commandName === 'mykey' || commandName === 'checkmykey') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -1604,38 +1710,156 @@ client.on('interactionCreate', async (interaction) => {
       const { customId } = interaction;
 
       // ----- BUTTONS: CONTROL PANEL -----
+
+      // Redeem Key -> modal input (auto detect month / lifetime)
       if (customId === 'control_redeem_key') {
-        await interaction.reply({
-          content:
-            'Untuk redeem key, gunakan perintah `/redeemkeysebulan` (monthly) atau `/redeemkeylifetime` (lifetime).\n' +
-            'Kalau belum punya key, silakan buka ticket lewat panel store (tombol **Buat Ticket**) di server ini.',
-          ephemeral: true,
-        });
+        const modal = new ModalBuilder()
+          .setCustomId('modal_redeem_key_any')
+          .setTitle('Redeem Paid Key');
+
+        const input = new TextInputBuilder()
+          .setCustomId('field_key_any')
+          .setLabel('Masukkan Key Sebulan / Lifetime')
+          .setPlaceholder('EXHUBPAID-XXXX')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
+        await interaction.showModal(modal);
         return;
       }
 
+      // Get Script -> kirim Desktop + Mobile (Tap to Copy)
       if (customId === 'control_get_script') {
-        let msg;
-        if (EXHUB_SCRIPT_URL) {
-          msg =
-            'Script utama ExHub bisa kamu ambil di link berikut:\n' +
-            EXHUB_SCRIPT_URL;
-        } else {
-          msg =
-            'Script utama ExHub biasanya dibagikan di channel script / website resmi.\n' +
-            'Silakan cek channel informasi script atau tanya admin jika belum menemukan link script.';
-        }
+        const scriptLine =
+          'loadstring(game:HttpGet("https://exc-webs.vercel.app/api/script/spear-fishing", true))()';
+
+        const msg =
+          '**Desktop Executor**\n' +
+          '```lua\n' +
+          scriptLine +
+          '\n```\n' +
+          '**Mobile (Tap to Copy)**\n' +
+          '`' +
+          scriptLine +
+          '`';
+
         await interaction.reply({ content: msg, ephemeral: true });
         return;
       }
 
+      // Check Key -> langsung panggil API dan kirim list paid+free
       if (customId === 'control_check_key') {
-        let msg =
-          'Untuk cek paid key yang terikat ke akun Discord kamu, gunakan perintah `/mykey` atau `/checkmykey`.\n';
-        if (EXHUB_DASHBOARD_URL) {
-          msg += `\nKamu juga bisa cek di dashboard web: ${EXHUB_DASHBOARD_URL}`;
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+          const info = await fetchUserKeyInfo(interaction.user);
+          const { paidKeys, freeKeys, allKeys } = info;
+
+          if (!allKeys.length) {
+            await interaction.editReply({
+              content:
+                'Tidak ada key (paid maupun free) yang tercatat atas akun Discord kamu.',
+            });
+            return;
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle('🔑 Your Keys')
+            .setDescription(
+              'Ringkasan key paid & free yang terikat ke akun Discord kamu.'
+            )
+            .setColor(0x5865f2);
+
+          const maxPaid = Math.min(paidKeys.length, 6);
+          const maxFree = Math.min(freeKeys.length, 6);
+
+          if (paidKeys.length) {
+            for (let i = 0; i < maxPaid; i++) {
+              const k = paidKeys[i];
+              const createdTs = k.createdAtMs
+                ? Math.floor(k.createdAtMs / 1000)
+                : null;
+              const expireTs = k.expiresAfterMs
+                ? Math.floor(k.expiresAfterMs / 1000)
+                : null;
+
+              let paidLabel;
+              if (k.type === 'month') paidLabel = 'Month (Sebulan)';
+              else if (k.type === 'lifetime') paidLabel = 'Lifetime';
+              else if (k.type) paidLabel = k.type;
+              else paidLabel = 'Paid';
+
+              const lines = [];
+              lines.push(`**Key:** \`${k.token}\``);
+              lines.push(`**Plan:** ${paidLabel}`);
+              if (createdTs) {
+                lines.push(`**Order:** <t:${createdTs}:f>`);
+              }
+              if (expireTs) {
+                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+              }
+              lines.push(`**Status:** ${k.status}`);
+
+              embed.addFields({
+                name: `Paid Key #${i + 1}`,
+                value: lines.join('\n'),
+                inline: false,
+              });
+            }
+          }
+
+          if (freeKeys.length) {
+            for (let i = 0; i < maxFree; i++) {
+              const k = freeKeys[i];
+              const createdTs = k.createdAtMs
+                ? Math.floor(k.createdAtMs / 1000)
+                : null;
+              const expireTs = k.expiresAfterMs
+                ? Math.floor(k.expiresAfterMs / 1000)
+                : null;
+
+              let providerLabel = k.provider || 'unknown';
+              if (providerLabel.includes('work.ink') || providerLabel === 'work.ink' || providerLabel === 'workink') {
+                providerLabel = 'Work.ink';
+              } else if (providerLabel.includes('linkvertise')) {
+                providerLabel = 'Linkvertise';
+              }
+
+              const lines = [];
+              lines.push(`**Key:** \`${k.token}\``);
+              lines.push(`**Provider:** ${providerLabel}`);
+              if (createdTs) {
+                lines.push(`**Claimed:** <t:${createdTs}:f>`);
+              }
+              if (expireTs) {
+                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+              }
+              lines.push(`**Status:** ${k.status}`);
+
+              embed.addFields({
+                name: `Free Key #${i + 1}`,
+                value: lines.join('\n'),
+                inline: false,
+              });
+            }
+          }
+
+          if (paidKeys.length > maxPaid || freeKeys.length > maxFree) {
+            embed.setFooter({
+              text: `Menampilkan sebagian dari total ${allKeys.length} key. Lihat dashboard web untuk detail lengkap.`,
+            });
+          }
+
+          await interaction.editReply({ embeds: [embed] });
+        } catch (err) {
+          console.error('control_check_key error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat membaca data key dari API. Coba lagi atau hubungi admin.',
+          });
         }
-        await interaction.reply({ content: msg, ephemeral: true });
         return;
       }
 
@@ -1650,21 +1874,186 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      // Claim Role -> cek paid key aktif dulu
       if (customId === 'control_claim_role') {
-        await interaction.reply({
-          content:
-            'Jika key kamu sudah aktif tetapi belum mendapatkan premium role:\n' +
-            '1. Pastikan kamu redeem key dengan akun Discord ini.\n' +
-            '2. Jika masih belum dapat, buka ticket dan minta admin untuk sinkronisasi role.\n' +
-            'Role juga bisa diberikan via panel reaction role / channel verify yang sudah disediakan di server.',
-          ephemeral: true,
-        });
+        if (!interaction.guild) {
+          await interaction.reply({
+            content: 'Perintah ini hanya dapat digunakan di dalam server.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        if (!PAID_ROLE_ID) {
+          await interaction.reply({
+            content:
+              'PAID_ROLE_ID belum dikonfigurasi di .env. Minta admin untuk mengisi ID role premium.',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const guild = interaction.guild;
+        const member = await guild.members.fetch(interaction.user.id);
+        const role = guild.roles.cache.get(PAID_ROLE_ID);
+
+        if (!role) {
+          await interaction.editReply({
+            content:
+              'Role premium (PAID_ROLE_ID) tidak ditemukan di server ini. Cek kembali konfigurasi role.',
+          });
+          return;
+        }
+
+        try {
+          const info = await fetchUserKeyInfo(interaction.user);
+          const activePaid = info.paidKeys.filter(
+            (k) => k.status === 'Active'
+          );
+
+          if (!activePaid.length) {
+            const orderMention = ORDER_PAID_CHANNEL_ID
+              ? `<#${ORDER_PAID_CHANNEL_ID}>`
+              : '#order-paid';
+
+            await interaction.editReply({
+              content:
+                `❌ You don't have an active paid key.\n` +
+                `Please order a paid month or lifetime key first in ${orderMention}.`,
+            });
+            return;
+          }
+
+          if (member.roles.cache.has(role.id)) {
+            await interaction.editReply({
+              content: `Kamu sudah memiliki role premium ${role}.`,
+            });
+            return;
+          }
+
+          await member.roles.add(role);
+          await interaction.editReply({
+            content: `✅ Kamu sudah diberikan role premium ${role} karena memiliki paid key aktif.`,
+          });
+        } catch (err) {
+          console.error('control_claim_role error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat mengecek key / memberikan role. Coba lagi atau hubungi admin.',
+          });
+        }
         return;
       }
 
+      // Get Stats -> ringkasan Total Keys, Paid/Free, Execute, Executor, dll
       if (customId === 'control_get_stats') {
-        const msg = buildRuntimeMessage(client);
-        await interaction.reply({ content: msg, ephemeral: true });
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+          const info = await fetchUserKeyInfo(interaction.user);
+          const { paidKeys, freeKeys, allKeys, stats } = info;
+
+          const totalKeys = allKeys.length;
+          const activePaid = paidKeys.filter((k) => k.status === 'Active');
+
+          const monthCount = paidKeys.filter((k) => k.type === 'month').length;
+          const lifeCount = paidKeys.filter(
+            (k) => k.type === 'lifetime'
+          ).length;
+          const otherPaid = paidKeys.length - monthCount - lifeCount;
+
+          const freeByProvider = {};
+          for (const k of freeKeys) {
+            let prov = k.provider || 'unknown';
+            if (prov.includes('work.ink') || prov === 'work.ink' || prov === 'workink') {
+              prov = 'Work.ink';
+            } else if (prov.includes('linkvertise')) {
+              prov = 'Linkvertise';
+            }
+            freeByProvider[prov] = (freeByProvider[prov] || 0) + 1;
+          }
+
+          const totalExec = stats.totalExec ?? 0;
+          const executorName = stats.executorName || 'Unknown';
+          const lastExecTs = stats.lastExecAtMs
+            ? Math.floor(stats.lastExecAtMs / 1000)
+            : null;
+          const lastClaimTs = stats.lastClaimAtMs
+            ? Math.floor(stats.lastClaimAtMs / 1000)
+            : null;
+
+          const embed = new EmbedBuilder()
+            .setTitle('Your Stats')
+            .setDescription(
+              'Summary of your account statistics.\nView detailed key information via the **Check Key** button.'
+            )
+            .setColor(0x2b2d31);
+
+          embed.addFields(
+            {
+              name: 'Total Keys',
+              value: String(totalKeys),
+              inline: true,
+            },
+            {
+              name: 'Paid Keys',
+              value: paidKeys.length
+                ? [
+                    `Total: **${paidKeys.length}**`,
+                    `Month: **${monthCount}**`,
+                    `Lifetime: **${lifeCount}**`,
+                    otherPaid > 0 ? `Other: **${otherPaid}**` : null,
+                    `Active: **${activePaid.length}**`,
+                  ]
+                    .filter(Boolean)
+                    .join('\n')
+                : '0',
+              inline: true,
+            },
+            {
+              name: 'Free Keys',
+              value:
+                freeKeys.length === 0
+                  ? '0'
+                  : Object.entries(freeByProvider)
+                      .map(([prov, count]) => `${prov}: **${count}**`)
+                      .join('\n'),
+              inline: true,
+            }
+          );
+
+          const execLines = [];
+          execLines.push(`Total Executes: **${totalExec}**`);
+          execLines.push(`Executor: **${executorName}**`);
+          if (lastExecTs) {
+            execLines.push(`Last Use: <t:${lastExecTs}:R>`);
+          }
+          if (stats.totalClaimed != null) {
+            execLines.push(`Total Claimed: **${stats.totalClaimed}**`);
+          }
+          if (lastClaimTs) {
+            execLines.push(`Last Claimed: <t:${lastClaimTs}:R>`);
+          }
+          if (stats.subscription) {
+            execLines.push(`Subscription: **${stats.subscription}**`);
+          }
+
+          embed.addFields({
+            name: 'Execution Stats',
+            value: execLines.join('\n'),
+            inline: false,
+          });
+
+          await interaction.editReply({ embeds: [embed] });
+        } catch (err) {
+          console.error('control_get_stats error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat mengambil stats dari API. Coba lagi atau hubungi admin.',
+          });
+        }
         return;
       }
 
@@ -1854,7 +2243,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // tombol "Ya, Benar!"
+      // tombol "Ya, Benar!" (konfirmasi username)
       if (customId.startsWith('roblox_confirm_')) {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -1871,13 +2260,11 @@ client.on('interactionCreate', async (interaction) => {
 
         const embed = interaction.message.embeds[0];
         let usernameText = '-';
-        let displayNameText = '-';
         let userIdText = '-';
 
         if (embed && Array.isArray(embed.fields)) {
           for (const f of embed.fields) {
             if (f.name === 'Username') usernameText = f.value;
-            if (f.name === 'Display Name') displayNameText = f.value;
             if (f.name === 'User ID') userIdText = f.value;
           }
         }
@@ -2429,6 +2816,133 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      // modal redeem key via tombol panel (auto detect type)
+      if (customId === 'modal_redeem_key_any') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const rawKey = interaction.fields
+          .getTextInputValue('field_key_any')
+          .trim();
+        const key = rawKey.toUpperCase();
+
+        if (!key) {
+          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
+          return;
+        }
+
+        try {
+          const data = await validatePaidKey(key);
+          const info = data.info || null;
+
+          if (!info) {
+            await interaction.editReply({
+              content: '❌ Key tidak ditemukan di database.',
+            });
+            return;
+          }
+
+          if (data.deleted) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah diblokir / dihapus.',
+            });
+            return;
+          }
+
+          if (data.expired) {
+            await interaction.editReply({
+              content: '❌ Key ini sudah kadaluarsa.',
+            });
+            return;
+          }
+
+          if (data.valid) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
+            });
+            return;
+          }
+
+          const keyType = normalizeKeyType(info.type || '');
+          if (!keyType) {
+            await interaction.editReply({
+              content:
+                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
+            });
+            return;
+          }
+
+          if (
+            keyType !== 'month' &&
+            keyType !== 'lifetime'
+          ) {
+            await interaction.editReply({
+              content:
+                `⚠️ Key ini bertipe "${info.type}" yang belum didukung redeem otomatis dari panel.\n` +
+                'Silakan hubungi admin untuk bantuan lebih lanjut.',
+            });
+            return;
+          }
+
+          if (
+            info.ownerDiscordId &&
+            String(info.ownerDiscordId) !== interaction.user.id
+          ) {
+            await interaction.editReply({
+              content:
+                '❌ Key ini terikat ke akun Discord lain.\n' +
+                'Gunakan akun Discord yang sama dengan yang melakukan order.',
+            });
+            return;
+          }
+
+          const ownerDiscordId = info.ownerDiscordId
+            ? String(info.ownerDiscordId)
+            : interaction.user.id;
+
+          try {
+            await createPaidKeyOnAPI(key, keyType, null, {
+              valid: true,
+              deleted: false,
+              createdAt: info.createdAt,
+              expiresAfter: info.expiresAfter,
+              byIp: 'discord-bot-redeem-any',
+              ownerDiscordId,
+            });
+          } catch (err) {
+            console.error(
+              'createPaidKeyOnAPI (redeem any) error:',
+              err
+            );
+            await interaction.editReply({
+              content:
+                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
+            });
+            return;
+          }
+
+          let labelType;
+          if (keyType === 'month') labelType = 'Key Sebulan';
+          else if (keyType === 'lifetime') labelType = 'Key Lifetime';
+          else labelType = `Key tipe "${info.type || 'unknown'}"`;
+
+          await interaction.editReply({
+            content:
+              `✅ ${labelType} berhasil digunakan!\n` +
+              `Key: \`${key}\`\n` +
+              'Terima kasih sudah menggunakan ExHub.',
+          });
+        } catch (err) {
+          console.error('validatePaidKey (any) error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
+          });
+        }
+
+        return;
+      }
+
       return;
     }
   } catch (err) {
@@ -2524,7 +3038,9 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('sendreactionrole')
-    .setDescription('Kirim pesan reaction role (multi role, multi emoji, multi channel)')
+    .setDescription(
+      'Kirim pesan reaction role (multi role, multi emoji, multi channel)'
+    )
     .addStringOption((opt) =>
       opt
         .setName('config')
@@ -2536,13 +3052,17 @@ const commands = [
     .addStringOption((opt) =>
       opt
         .setName('channels')
-        .setDescription('Channel (mention/ID, pisah spasi/koma). Kosongkan = channel ini.')
+        .setDescription(
+          'Channel (mention/ID, pisah spasi/koma). Kosongkan = channel ini.'
+        )
         .setRequired(false)
     )
     .addStringOption((opt) =>
       opt
         .setName('content')
-        .setDescription('Pesan yang dikirim sebelum daftar emoji (optional, override # di config)')
+        .setDescription(
+          'Pesan yang dikirim sebelum daftar emoji (optional, override # di config)'
+        )
         .setRequired(false)
     ),
   new SlashCommandBuilder()
