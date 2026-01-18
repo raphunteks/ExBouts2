@@ -26,6 +26,7 @@ const {
   Events,
 } = require('discord.js');
 
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
 
@@ -72,8 +73,11 @@ const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
-// background untuk welcome (gambar 700x250 yang kamu host di mana saja)
+// background untuk welcome (gambar 700x250 / HD yang kamu host)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
+// background khusus kartu welcome (kalau tidak di-set, fallback ke WELCOME_BG_URL)
+const WELCOME_CARD_BG_URL =
+  process.env.WELCOME_CARD_BG_URL || WELCOME_BG_URL || null;
 
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
@@ -450,6 +454,128 @@ async function logOrder(guild, embed) {
   }
 }
 
+// ---------- WELCOME CARD HELPER (Canvas) -----------------------
+
+/**
+ * Generate Buffer PNG kartu welcome (avatar + background + teks)
+ * Mirip contoh: avatar lingkaran di tengah, teks WELCOME dan username di bawah.
+ * @param {import('discord.js').GuildMember} member
+ * @returns {Promise<Buffer>}
+ */
+async function generateWelcomeCard(member) {
+  // Sesuaikan dengan ukuran background-mu (ini kira-kira ratio contoh)
+  const width = 1262;
+  const height = 576;
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // 1) Background
+  if (WELCOME_CARD_BG_URL) {
+    try {
+      const bg = await loadImage(WELCOME_CARD_BG_URL);
+      ctx.drawImage(bg, 0, 0, width, height);
+    } catch (err) {
+      console.error('[welcome-card] Gagal load background:', err);
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(0, 0, width, height);
+    }
+  } else {
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // 2) Avatar lingkaran
+  const avatarUrl = member.user.displayAvatarURL({
+    extension: 'png',
+    size: 512,
+  });
+
+  let avatar;
+  try {
+    avatar = await loadImage(avatarUrl);
+  } catch (err) {
+    console.error('[welcome-card] Gagal load avatar:', err);
+    avatar = null;
+  }
+
+  const avatarRadius = 150;
+  const avatarX = width / 2;
+  const avatarY = height * 0.33; // agak ke atas
+
+  if (avatar) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avatarX, avatarY, avatarRadius, 0, Math.PI * 2, true);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.drawImage(
+      avatar,
+      avatarX - avatarRadius,
+      avatarY - avatarRadius,
+      avatarRadius * 2,
+      avatarRadius * 2
+    );
+    ctx.restore();
+  }
+
+  // Border avatar
+  ctx.beginPath();
+  ctx.arc(avatarX, avatarY, avatarRadius + 8, 0, Math.PI * 2, true);
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = '#2196f3';
+  ctx.stroke();
+
+  // 3) Teks "WELCOME"
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 4;
+
+  ctx.fillStyle = '#2196f3';
+  ctx.font = 'bold 96px Sans-Serif';
+  const welcomeTextY = avatarY + avatarRadius + 80;
+  ctx.fillText('WELCOME', width / 2, welcomeTextY);
+
+  // 4) Teks Username di bawahnya
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 10;
+
+  const baseUsername =
+    member.user.globalName || member.user.username || 'NEW MEMBER';
+  const username = baseUsername.toUpperCase();
+
+  // auto shrink font kalau username terlalu panjang
+  let fontSize = 54;
+  ctx.font = `bold ${fontSize}px Sans-Serif`;
+  let measured = ctx.measureText(username);
+  const maxWidth = width - 220;
+
+  while (measured.width > maxWidth && fontSize > 26) {
+    fontSize -= 4;
+    ctx.font = `bold ${fontSize}px Sans-Serif`;
+    measured = ctx.measureText(username);
+  }
+
+  ctx.fillStyle = '#ffffff';
+  const usernameY = welcomeTextY + 70;
+  ctx.fillText(username, width / 2, usernameY);
+
+  // reset shadow
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  // 5) Encode ke PNG
+  const buffer = await canvas.encode('png');
+  return buffer;
+}
+
 // ---------- SERVER STATS HELPER --------------------------------
 
 async function updateServerStats(guild) {
@@ -486,19 +612,19 @@ async function updateServerStats(guild) {
     const targets = [
       {
         id: SERVER_STATS_ALL_ID,
-        name: `🔒 🌍 • All Members: ${totalMembers}`,
+        name: `🌍 • All Members: ${totalMembers}`,
       },
       {
         id: SERVER_STATS_MEMBERS_ID,
-        name: `🔒 📈 • Members: ${humans}`,
+        name: `📈 • Members: ${humans}`,
       },
       {
         id: SERVER_STATS_BOTS_ID,
-        name: `🔒 🤖 • Bots: ${bots}`,
+        name: `🤖 • Bots: ${bots}`,
       },
       {
         id: SERVER_STATS_BOOSTS_ID,
-        name: `🔒 🚀 • Boosts: ${boosts}`,
+        name: `🚀 • Boosts: ${boosts}`,
       },
     ];
 
@@ -565,29 +691,44 @@ client.once(Events.ClientReady, async (c) => {
   }
 });
 
-// Welcome message + refresh stats
+// Welcome message + refresh stats (dengan kartu Canvas)
 client.on('guildMemberAdd', async (member) => {
   try {
     const channelId = welcomeChannelId;
-    if (channelId) {
-      const ch = member.guild.channels.cache.get(channelId);
-      if (ch) {
-        const emb = new EmbedBuilder()
-          .setTitle('👋 Selamat Datang!')
-          .setDescription(
-            `Halo ${member}, selamat datang di **${member.guild.name}**!\n\n` +
-              'Pastikan baca rules & pilih role yang sesuai sebelum mulai chat.'
-          )
-          .setThumbnail(
-            member.user.displayAvatarURL({ extension: 'png', size: 256 })
-          )
-          .setColor(0x5865f2);
-
-        if (WELCOME_BG_URL) emb.setImage(WELCOME_BG_URL);
-
-        await ch.send({ content: `<@${member.id}>`, embeds: [emb] });
-      }
+    if (!channelId) {
+      await updateServerStats(member.guild);
+      return;
     }
+
+    const ch = member.guild.channels.cache.get(channelId);
+    if (!ch) {
+      await updateServerStats(member.guild);
+      return;
+    }
+
+    let files = [];
+    try {
+      const imgBuffer = await generateWelcomeCard(member);
+      const attachment = new AttachmentBuilder(imgBuffer, {
+        name: 'welcome-card.png',
+      });
+      files.push(attachment);
+    } catch (err) {
+      console.error('[welcome-card] gagal generate kartu:', err);
+    }
+
+    const emb = new EmbedBuilder()
+      .setDescription(
+        `Halo ${member}, selamat datang di **${member.guild.name}**!\n` +
+          'Jangan lupa baca rules & ambil role dulu di atas ya.'
+      )
+      .setColor(0x5865f2);
+
+    await ch.send({
+      content: `<@${member.id}>`,
+      embeds: [emb],
+      files: files.length ? files : undefined,
+    });
 
     await updateServerStats(member.guild);
   } catch (err) {
@@ -719,7 +860,7 @@ async function sendTicketIntroMessage(channel, user) {
     '1. Pilih paket dari dropdown menu di bawah.',
     '2. Ikuti instruksi yang muncul.',
     '3. Upload bukti bayar (screenshot QRIS) di channel ini.',
-    '4. Tunggu admin konfirmasi ✅',
+    '4. Tunggu konfirmasi admin ✅',
     '',
     '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.',
   ].join('\n');
