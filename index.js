@@ -720,7 +720,7 @@ client.on('guildMemberAdd', async (member) => {
     const emb = new EmbedBuilder()
       .setDescription(
         `Halo ${member}, selamat datang di **${member.guild.name}**!\n` +
-          'Jangan lupa baca rules & ambil role dulu di atas ya.'
+          'Jangan lupa baca rules & ambil role dulu di channel #✅verify.'
       )
       .setColor(0x5865f2);
 
