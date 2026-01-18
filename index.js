@@ -73,6 +73,10 @@ const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
+// endpoint script & dashboard (opsional, untuk tombol panel kontrol)
+const EXHUB_SCRIPT_URL = process.env.EXHUB_SCRIPT_URL || null;
+const EXHUB_DASHBOARD_URL = process.env.EXHUB_DASHBOARD_URL || null;
+
 // background untuk welcome (gambar 700x250 / HD yang kamu host)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 // background khusus kartu welcome (kalau tidak di-set, fallback ke WELCOME_BG_URL)
@@ -125,6 +129,55 @@ function formatSecondsToHMS(sec) {
   const h = Math.floor(sec / 3600);
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+// Pesan runtime dipakai /runtime dan tombol panel kontrol
+function buildRuntimeMessage(client) {
+  const uptimeSec = Math.floor(process.uptime());
+  const startTimestampSec = Math.floor(BOT_START_TIME / 1000);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const mem = process.memoryUsage();
+  const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
+  const toGB = (bytes) => (bytes / 1024 / 1024 / 1024).toFixed(2);
+
+  const guildCount = client.guilds.cache.size;
+
+  const osType = os.type();
+  const osRelease = os.release();
+  const osPlatform = os.platform();
+  const osArch = os.arch();
+
+  const cpus = os.cpus() || [];
+  const coreCount = cpus.length;
+  const cpuModel = coreCount ? cpus[0].model : 'Unknown';
+  const cpuSpeed = coreCount ? cpus[0].speed : 0;
+
+  const totalMemBytes = os.totalmem();
+  const freeMemBytes = os.freemem();
+
+  const cpuLines = coreCount
+    ? `• CPU           : \`${cpuModel}\`\n` +
+      `• CPU Cores     : \`${coreCount} cores @ ${cpuSpeed} MHz\`\n`
+    : '• CPU           : `Unknown`\n';
+
+  const msg =
+    `⏱️ **Runtime Bot**\n` +
+    `• Uptime        : \`${formatSecondsToHMS(
+      uptimeSec
+    )}\` (sejak <t:${nowSec - uptimeSec}:R>)\n` +
+    `• Start Time    : <t:${startTimestampSec}:F>\n` +
+    `• Guilds        : \`${guildCount}\`\n` +
+    `• Node.js       : \`${process.version}\`\n` +
+    `• Memory (RSS)  : \`${toMB(mem.rss)} MB\`\n` +
+    `• Heap Used     : \`${toMB(mem.heapUsed)} MB\`` +
+    `\n\n🖥️ **Spesifikasi Core VPS**\n` +
+    `• OS            : \`${osType} ${osRelease} (${osPlatform}/${osArch})\`\n` +
+    cpuLines +
+    `• RAM (Total)   : \`${toGB(totalMemBytes)} GB\`\n` +
+    `• RAM (Free)    : \`${toGB(freeMemBytes)} GB\``;
+
+  return msg;
 }
 
 // Normalisasi tipe key yang tersimpan di API
@@ -841,6 +894,72 @@ async function sendStorePanel(channel) {
   await channel.send({ embeds: [embed], components: [row] });
 }
 
+// Panel kontrol ala Sixsense (Redeem Key, Get Script, dll.)
+async function sendControlPanel(channel, guild) {
+  const embed = new EmbedBuilder()
+    .setTitle('ExHub Control Panel')
+    .setDescription(
+      'This control panel is for the project: **ExHub**.\n\n' +
+        'Got a key? redeem it right here. If you bought one but are missing your premium role, just hit the **Claim Role** button.\n\n' +
+        'Feel free to check out the other buttons in this panel depending on what roles you have.'
+    )
+    .setColor(0x2b2d31);
+
+  if (guild && guild.iconURL()) {
+    embed.setThumbnail(guild.iconURL({ size: 256 }));
+  }
+
+  const btnRedeem = new ButtonBuilder()
+    .setCustomId('control_redeem_key')
+    .setLabel('Redeem Key')
+    .setEmoji('🔑')
+    .setStyle(ButtonStyle.Primary);
+
+  const btnGetScript = new ButtonBuilder()
+    .setCustomId('control_get_script')
+    .setLabel('Get Script')
+    .setEmoji('📜')
+    .setStyle(ButtonStyle.Success);
+
+  const btnCheckKey = new ButtonBuilder()
+    .setCustomId('control_check_key')
+    .setLabel('Check Key')
+    .setEmoji('🔎')
+    .setStyle(ButtonStyle.Secondary);
+
+  const btnResetHwid = new ButtonBuilder()
+    .setCustomId('control_reset_hwid')
+    .setLabel('Reset HWID')
+    .setEmoji('♻️')
+    .setStyle(ButtonStyle.Danger);
+
+  const btnClaimRole = new ButtonBuilder()
+    .setCustomId('control_claim_role')
+    .setLabel('Claim Role')
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Success);
+
+  const btnGetStats = new ButtonBuilder()
+    .setCustomId('control_get_stats')
+    .setLabel('Get Stats')
+    .setEmoji('📊')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row1 = new ActionRowBuilder().addComponents(
+    btnRedeem,
+    btnGetScript,
+    btnCheckKey,
+    btnResetHwid
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    btnClaimRole,
+    btnGetStats
+  );
+
+  await channel.send({ embeds: [embed], components: [row1, row2] });
+}
+
 async function sendTicketIntroMessage(channel, user) {
   const desc = [
     `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
@@ -948,6 +1067,16 @@ client.on('interactionCreate', async (interaction) => {
         await sendStorePanel(interaction.channel);
         await interaction.reply({
           content: 'Panel ticket store sudah dikirim di channel ini.',
+          ephemeral: true,
+        });
+      }
+
+      // /sendcontrolpanel
+      else if (commandName === 'sendcontrolpanel') {
+        if (!(await ensureOwner())) return;
+        await sendControlPanel(interaction.channel, interaction.guild);
+        await interaction.reply({
+          content: 'Control panel utama sudah dikirim di channel ini.',
           ephemeral: true,
         });
       }
@@ -1379,50 +1508,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // /runtime
       else if (commandName === 'runtime') {
-        const uptimeSec = Math.floor(process.uptime());
-        const startTimestampSec = Math.floor(BOT_START_TIME / 1000);
-        const nowSec = Math.floor(Date.now() / 1000);
-
-        const mem = process.memoryUsage();
-        const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
-        const toGB = (bytes) => (bytes / 1024 / 1024 / 1024).toFixed(2);
-
-        const guildCount = client.guilds.cache.size;
-
-        const osType = os.type();
-        const osRelease = os.release();
-        const osPlatform = os.platform();
-        const osArch = os.arch();
-
-        const cpus = os.cpus() || [];
-        const coreCount = cpus.length;
-        const cpuModel = coreCount ? cpus[0].model : 'Unknown';
-        const cpuSpeed = coreCount ? cpus[0].speed : 0;
-
-        const totalMemBytes = os.totalmem();
-        const freeMemBytes = os.freemem();
-
-        const cpuLines = coreCount
-          ? `• CPU           : \`${cpuModel}\`\n` +
-            `• CPU Cores     : \`${coreCount} cores @ ${cpuSpeed} MHz\`\n`
-          : '• CPU           : `Unknown`\n';
-
-        const msg =
-          `⏱️ **Runtime Bot**\n` +
-          `• Uptime        : \`${formatSecondsToHMS(
-            uptimeSec
-          )}\` (sejak <t:${nowSec - uptimeSec}:R>)\n` +
-          `• Start Time    : <t:${startTimestampSec}:F>\n` +
-          `• Guilds        : \`${guildCount}\`\n` +
-          `• Node.js       : \`${process.version}\`\n` +
-          `• Memory (RSS)  : \`${toMB(mem.rss)} MB\`\n` +
-          `• Heap Used     : \`${toMB(mem.heapUsed)} MB\`` +
-          `\n\n🖥️ **Spesifikasi Core VPS**\n` +
-          `• OS            : \`${osType} ${osRelease} (${osPlatform}/${osArch})\`\n` +
-          cpuLines +
-          `• RAM (Total)   : \`${toGB(totalMemBytes)} GB\`\n` +
-          `• RAM (Free)    : \`${toGB(freeMemBytes)} GB\``;
-
+        const msg = buildRuntimeMessage(client);
         await interaction.reply({ content: msg, ephemeral: true });
       }
 
@@ -1516,6 +1602,73 @@ client.on('interactionCreate', async (interaction) => {
     // ===================== BUTTONS ==============================
     if (interaction.isButton()) {
       const { customId } = interaction;
+
+      // ----- BUTTONS: CONTROL PANEL -----
+      if (customId === 'control_redeem_key') {
+        await interaction.reply({
+          content:
+            'Untuk redeem key, gunakan perintah `/redeemkeysebulan` (monthly) atau `/redeemkeylifetime` (lifetime).\n' +
+            'Kalau belum punya key, silakan buka ticket lewat panel store (tombol **Buat Ticket**) di server ini.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (customId === 'control_get_script') {
+        let msg;
+        if (EXHUB_SCRIPT_URL) {
+          msg =
+            'Script utama ExHub bisa kamu ambil di link berikut:\n' +
+            EXHUB_SCRIPT_URL;
+        } else {
+          msg =
+            'Script utama ExHub biasanya dibagikan di channel script / website resmi.\n' +
+            'Silakan cek channel informasi script atau tanya admin jika belum menemukan link script.';
+        }
+        await interaction.reply({ content: msg, ephemeral: true });
+        return;
+      }
+
+      if (customId === 'control_check_key') {
+        let msg =
+          'Untuk cek paid key yang terikat ke akun Discord kamu, gunakan perintah `/mykey` atau `/checkmykey`.\n';
+        if (EXHUB_DASHBOARD_URL) {
+          msg += `\nKamu juga bisa cek di dashboard web: ${EXHUB_DASHBOARD_URL}`;
+        }
+        await interaction.reply({ content: msg, ephemeral: true });
+        return;
+      }
+
+      if (customId === 'control_reset_hwid') {
+        await interaction.reply({
+          content:
+            'Reset HWID saat ini masih dilakukan secara manual lewat ticket.\n' +
+            'Buka ticket, sertakan username Roblox dan bukti pembelian, lalu minta admin untuk reset HWID.\n' +
+            'Jika nanti ada API reset HWID, tombol ini bisa dihubungkan langsung ke sistem tersebut.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (customId === 'control_claim_role') {
+        await interaction.reply({
+          content:
+            'Jika key kamu sudah aktif tetapi belum mendapatkan premium role:\n' +
+            '1. Pastikan kamu redeem key dengan akun Discord ini.\n' +
+            '2. Jika masih belum dapat, buka ticket dan minta admin untuk sinkronisasi role.\n' +
+            'Role juga bisa diberikan via panel reaction role / channel verify yang sudah disediakan di server.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (customId === 'control_get_stats') {
+        const msg = buildRuntimeMessage(client);
+        await interaction.reply({ content: msg, ephemeral: true });
+        return;
+      }
+
+      // ----- BUTTONS: TICKET / ROBLOX FLOW -----
 
       // create ticket
       if (customId === 'store_create_ticket') {
@@ -2297,6 +2450,9 @@ const commands = [
   new SlashCommandBuilder()
     .setName('sendticketpanel')
     .setDescription('Kirim panel store / ticket di channel ini'),
+  new SlashCommandBuilder()
+    .setName('sendcontrolpanel')
+    .setDescription('Kirim control panel utama ExHub di channel ini'),
   new SlashCommandBuilder()
     .setName('setharga_sebulan')
     .setDescription('Ubah harga paket Key Sebulan')
