@@ -193,11 +193,11 @@ function buildRuntimeMessage(client) {
   return msg;
 }
 
-// Pecah string jadi list (pisah newline atau ;)
+// Pecah string jadi list (pisah newline, ;, atau ,)
 function splitList(text) {
   if (!text) return [];
   return String(text)
-    .split(/[\n;]+/g)
+    .split(/[\n;,]+/g)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -293,15 +293,28 @@ function mapStatusLabelAndColor(rawStatus) {
 /**
  * Build payload pesan NEW UPDATE SC:
  *
- * :green_circle: **NEW UPDATE SC**
+ * **【:green_circle: 】NEW UPDATE SC**
+ * ``` 
  * [SCRIPT]: ...
  * [STATUS]: [🟢] WORKING / STABLE | [🟡] OUTDATED (BISA DIPAKE) | ❌ ...
- * ℹ️ FEATURES
+ * ```
+ *
+ * **【:information_source:】 FEATURES **
+ * ```
  * [✅] ...
- * ℹ️ CHANGE LOGS
+ * [✅] ...
+ * ```
+ *
+ * **【:arrow_up_down: 】 CHANGE LOGS **
+ * ```
  * [+] ...
- * :hourglass_flowing_sand: NEXT UPDATE
- * ...
+ * [+] ...
+ * ```
+ *
+ * **【:hourglass_flowing_sand:】NEXT UPDATE**
+ * ```
+ * [⏭️] ...
+ * ```
  */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
@@ -316,11 +329,7 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   const changeLogsList = splitList(
     options.changeLogs || options.changelogs || ''
   );
-  let nextUpdateList = splitList(options.nextUpdate || '');
-
-  if (!nextUpdateList.length) {
-    nextUpdateList = ['-'];
-  }
+  const nextUpdateList = splitList(options.nextUpdate || '');
 
   const featureLines =
     featuresList.length > 0
@@ -332,30 +341,40 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
       ? changeLogsList.map((c) => `[+] ${c}`)
       : ['-'];
 
-  const nextUpdateText = nextUpdateList.join('\n');
+  const nextUpdateLines =
+    nextUpdateList.length > 0
+      ? nextUpdateList.map((n) => `[⏭️] ${n}`)
+      : ['[⏭️] -'];
 
   const mention =
     EVERYONE_ROLE_ID && /^\d{5,}$/.test(EVERYONE_ROLE_ID)
       ? `<@&${EVERYONE_ROLE_ID}>`
       : '@everyone';
 
-  const lines = [
-    ':green_circle: **NEW UPDATE SC**',
-    '',
+  const descriptionLines = [
+    '**【:green_circle: 】NEW UPDATE SC**',
+    '```',
     `[SCRIPT]: ${scriptName}`,
     `[STATUS]: ${statusLabel}`,
+    '```',
     '',
-    'ℹ️ FEATURES',
+    '**【:information_source:】 FEATURES **',
+    '```',
     ...featureLines,
+    '```',
     '',
-    'ℹ️ CHANGE LOGS',
+    '**【:arrow_up_down: 】 CHANGE LOGS **',
+    '```',
     ...changelogLines,
+    '```',
     '',
-    ':hourglass_flowing_sand: NEXT UPDATE',
-    nextUpdateText,
+    '**【:hourglass_flowing_sand:】NEXT UPDATE**',
+    '```',
+    ...nextUpdateLines,
+    '```',
   ];
 
-  const description = lines.join('\n');
+  const description = descriptionLines.join('\n');
 
   const guildName = guild ? guild.name : 'ExHub';
   const footerText = `${guildName} | ${formatDateTimeWIB()}`;
@@ -3343,7 +3362,7 @@ const commands = [
       opt
         .setName('features')
         .setDescription(
-          'Daftar fitur (pisah dengan ; atau newline). Contoh: Auto Farm; Auto Skill; ESP Fish'
+          'Daftar fitur (pisah dengan koma, ;, atau newline). Contoh: Auto Farm, Auto Skill, ESP Fish'
         )
         .setRequired(true)
     )
@@ -3351,14 +3370,16 @@ const commands = [
       opt
         .setName('changelogs')
         .setDescription(
-          'Daftar change logs (pisah dengan ; atau newline). Contoh: Added Hide Nickname; Added Low Graphic'
+          'Daftar change logs (pisah dengan koma, ;, atau newline). Contoh: Added Hide Nickname, Added Low Graphic'
         )
         .setRequired(true)
     )
     .addStringOption((opt) =>
       opt
         .setName('nextupdate')
-        .setDescription('Rencana next update (boleh "-" jika belum ada)')
+        .setDescription(
+          'Rencana next update (pisah dengan koma/; jika lebih dari 1, atau "-" jika belum ada)'
+        )
         .setRequired(false)
     )
     .addChannelOption((opt) =>
@@ -3420,6 +3441,7 @@ const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 //   "features": "Feature 1; Feature 2; Feature 3",
 //   "changeLogs": "Change 1; Change 2",
 //   "nextUpdate": "-",
+//
 //   "channelId": "ID_CHANNEL_TUJUAN (optional, fallback ke UPDATE_CHANNEL_ID)"
 // }
 const HTTP_PORT =
