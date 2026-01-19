@@ -1,3 +1,7 @@
+
+Silakan ganti file `index.js` kamu dengan yang di bawah ini (perbedaan utama ada di fungsi `splitList` dan `buildScriptUpdatePayload`, plus text deskripsi di builder `/sendupdatesc`):
+
+```js
 // index.js
 // =====================================================
 //  ExHub Store / Ticket Bot (single file, Railway ready)
