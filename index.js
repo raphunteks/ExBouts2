@@ -226,12 +226,76 @@ function formatDateTimeWIB(date = new Date()) {
   return `Today ${day}-${month}-${year} ${hour}:${minute} WIB`;
 }
 
+// Mapping STATUS -> label + warna embed
+function mapStatusLabelAndColor(rawStatus) {
+  const s = String(rawStatus || '').trim();
+
+  if (!s) {
+    return {
+      label: '[🟢] WORKING / STABLE',
+      color: 0x57f287, // hijau
+    };
+  }
+
+  const upper = s.toUpperCase();
+
+  // WORKING / STABLE / ONLINE
+  if (
+    upper.includes('WORKING') ||
+    upper.includes('STABLE') ||
+    upper === 'ONLINE'
+  ) {
+    return {
+      label: '[🟢] WORKING / STABLE',
+      color: 0x57f287,
+    };
+  }
+
+  // OUTDATED (BISA DIPAKE)
+  if (upper.startsWith('OUTDATED')) {
+    return {
+      label: '[🟡] OUTDATED (BISA DIPAKE)',
+      color: 0xfee75c,
+    };
+  }
+
+  // NOT WORKING / OFFLINE
+  if (upper.includes('NOT WORKING') || upper === 'OFFLINE') {
+    return {
+      label: '❌ NOT WORKING',
+      color: 0xed4245,
+    };
+  }
+
+  // NEED UPDATE
+  if (upper.includes('NEED UPDATE')) {
+    return {
+      label: '🛠️ NEED UPDATE',
+      color: 0xf39c12,
+    };
+  }
+
+  // COMING SOON
+  if (upper.includes('COMING SOON')) {
+    return {
+      label: '⏳ COMING SOON',
+      color: 0x2b2d31,
+    };
+  }
+
+  // Default: pakai apa adanya, warna netral
+  return {
+    label: s,
+    color: 0x2b2d31,
+  };
+}
+
 /**
- * Build payload pesan NEW UPDATE SC sesuai format:
- * @everyone
- * :green_circle: NEW UPDATE SC
+ * Build payload pesan NEW UPDATE SC:
+ *
+ * :green_circle: **NEW UPDATE SC**
  * [SCRIPT]: ...
- * [STATUS]: ...
+ * [STATUS]: [🟢] WORKING / STABLE | [🟡] OUTDATED (BISA DIPAKE) | ❌ ...
  * ℹ️ FEATURES
  * [✅] ...
  * ℹ️ CHANGE LOGS
@@ -241,7 +305,12 @@ function formatDateTimeWIB(date = new Date()) {
  */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
-  const status = (options.status || 'WORKING').toUpperCase();
+
+  // Status mentah dari slash command / admin form
+  const rawStatus = options.status || 'WORKING';
+
+  // Konversi ke label + warna standar
+  const { label: statusLabel, color } = mapStatusLabelAndColor(rawStatus);
 
   const featuresList = splitList(options.features || '');
   const changeLogsList = splitList(
@@ -273,14 +342,14 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   const lines = [
     ':green_circle: **NEW UPDATE SC**',
     '',
-    ```[SCRIPT]: ${scriptName}```,
-    ```[STATUS]: ${status}```,
+    `[SCRIPT]: ${scriptName}`,
+    `[STATUS]: ${statusLabel}`,
     '',
     'ℹ️ FEATURES',
-    ```...featureLines ```,
+    ...featureLines,
     '',
     'ℹ️ CHANGE LOGS',
-    ```...changelogLines```,
+    ...changelogLines,
     '',
     ':hourglass_flowing_sand: NEXT UPDATE',
     nextUpdateText,
@@ -297,9 +366,7 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
     clientInstance.user.displayAvatarURL();
   const footerIcon = botAvatar || null;
 
-  const embed = new EmbedBuilder()
-    .setDescription(description)
-    .setColor(0x2b2d31);
+  const embed = new EmbedBuilder().setDescription(description).setColor(color);
 
   if (footerIcon) {
     embed.setFooter({ text: footerText, iconURL: footerIcon });
@@ -3258,13 +3325,18 @@ const commands = [
     .addStringOption((opt) =>
       opt
         .setName('status')
-        .setDescription('Status script (WORKING / ONLINE / OFFLINE / dst)')
+        .setDescription('Status script')
         .setRequired(true)
         .addChoices(
-          { name: 'WORKING', value: 'WORKING' },
+          { name: '[🟢] WORKING / STABLE', value: 'WORKING' },
           { name: 'ONLINE', value: 'ONLINE' },
-          { name: 'OFFLINE', value: 'OFFLINE' },
-          { name: 'OUTDATED (BISA DIPAKE)', value: 'OUTDATED (BISA DIPAKE)' }
+          { name: 'OFFLINE (NOT WORKING)', value: 'OFFLINE' },
+          {
+            name: '[🟡] OUTDATED (BISA DIPAKE)',
+            value: 'OUTDATED (BISA DIPAKE)',
+          },
+          { name: '🛠️ NEED UPDATE', value: 'NEED UPDATE' },
+          { name: '⏳ COMING SOON', value: 'COMING SOON' }
         )
     )
     .addStringOption((opt) =>
