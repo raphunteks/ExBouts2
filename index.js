@@ -29,6 +29,7 @@ const {
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
+const http = require('http'); // HTTP server untuk integrasi admin dashboard
 
 // ---------- ENV & CONFIG ---------------------------------------
 
@@ -91,9 +92,12 @@ const WELCOME_CARD_BG_URL =
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
-// Konfigurasi pengumuman NEW UPDATE SC
-const EVERYONE_ROLE_ID = process.env.EVERYONE_ROLE_ID || null;
+// role yang akan di-mention untuk NEW UPDATE SC + channel default
+const EVERYONE_ROLE_ID =
+  process.env.EVERYONE_ROLE_ID || '1462774806079340574';
 const UPDATE_CHANNEL_ID = process.env.UPDATE_CHANNEL_ID || null;
+// Secret optional untuk API HTTP admin (jika diisi, wajib dikirim dari serverv2.js)
+const ADMIN_UPDATE_SECRET = process.env.ADMIN_UPDATE_SECRET || null;
 
 // ---------- SERVER STATS CONFIG --------------------------------
 // Kategori + 4 channel untuk panel "📊 SERVER STATS 📊"
@@ -189,51 +193,124 @@ function buildRuntimeMessage(client) {
   return msg;
 }
 
-// Format tanggal ke Waktu Indonesia Barat (Asia/Jakarta)
-function formatDateWIB(date = new Date()) {
-  try {
-    const fmt = new Intl.DateTimeFormat('id-ID', {
-      timeZone: 'Asia/Jakarta',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(date);
-    const get = (type) =>
-      parts.find((p) => p.type === type)?.value || '';
-    const day = get('day');
-    const month = get('month');
-    const year = get('year');
-    const hour = get('hour');
-    const minute = get('minute');
-    return `${day}-${month}-${year} ${hour}:${minute} WIB`;
-  } catch (err) {
-    console.error('formatDateWIB error:', err);
-    const d = date;
-    const day = String(d.getUTCDate()).padStart(2, '0');
-    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const year = d.getUTCFullYear();
-    const hour = String(d.getUTCHours()).padStart(2, '0');
-    const minute = String(d.getUTCMinutes()).padStart(2, '0');
-    return `${day}-${month}-${year} ${hour}:${minute} WIB`;
-  }
+// Pecah string jadi list (pisah newline atau ;)
+function splitList(text) {
+  if (!text) return [];
+  return String(text)
+    .split(/[\n;]+/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-// Parse list teks (fitur / changelog) dari string
-function parseLines(raw) {
-  if (!raw) return [];
-  let segments;
-  if (raw.includes('\n')) {
-    segments = raw.split(/\r?\n/);
-  } else if (raw.includes(';')) {
-    segments = raw.split(';');
-  } else {
-    segments = raw.split(',');
+// Format sekarang ke "Today DD-MM-YYYY HH:MM WIB"
+function formatDateTimeWIB(date = new Date()) {
+  const dtf = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  const parts = dtf.formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? '';
+
+  const day = get('day');
+  const month = get('month');
+  const year = get('year');
+  const hour = get('hour');
+  const minute = get('minute');
+
+  return `Today ${day}-${month}-${year} ${hour}:${minute} WIB`;
+}
+
+/**
+ * Build payload pesan NEW UPDATE SC sesuai format:
+ * @everyone
+ * :green_circle: NEW UPDATE SC
+ * [SCRIPT]: ...
+ * [STATUS]: ...
+ * ℹ️ FEATURES
+ * [✅] ...
+ * ℹ️ CHANGE LOGS
+ * [+] ...
+ * :hourglass_flowing_sand: NEXT UPDATE
+ * ...
+ */
+function buildScriptUpdatePayload(options, guild, clientInstance) {
+  const scriptName = options.scriptName || options.script || 'UNKNOWN';
+  const status = (options.status || 'WORKING').toUpperCase();
+
+  const featuresList = splitList(options.features || '');
+  const changeLogsList = splitList(
+    options.changeLogs || options.changelogs || ''
+  );
+  let nextUpdateList = splitList(options.nextUpdate || '');
+
+  if (!nextUpdateList.length) {
+    nextUpdateList = ['-'];
   }
-  return segments.map((s) => s.trim()).filter(Boolean);
+
+  const featureLines =
+    featuresList.length > 0
+      ? featuresList.map((f) => `[✅] ${f}`)
+      : ['(no features listed)'];
+
+  const changelogLines =
+    changeLogsList.length > 0
+      ? changeLogsList.map((c) => `[+] ${c}`)
+      : ['-'];
+
+  const nextUpdateText = nextUpdateList.join('\n');
+
+  const mention =
+    EVERYONE_ROLE_ID && /^\d{5,}$/.test(EVERYONE_ROLE_ID)
+      ? `<@&${EVERYONE_ROLE_ID}>`
+      : '@everyone';
+
+  const lines = [
+    ':green_circle: **NEW UPDATE SC**',
+    '',
+    `[SCRIPT]: ${scriptName}`,
+    `[STATUS]: ${status}`,
+    '',
+    'ℹ️ FEATURES',
+    ...featureLines,
+    '',
+    'ℹ️ CHANGE LOGS',
+    ...changelogLines,
+    '',
+    ':hourglass_flowing_sand: NEXT UPDATE',
+    nextUpdateText,
+  ];
+
+  const description = lines.join('\n');
+
+  const guildName = guild ? guild.name : 'ExHub';
+  const footerText = `${guildName} | ${formatDateTimeWIB()}`;
+
+  const botAvatar =
+    clientInstance &&
+    clientInstance.user &&
+    clientInstance.user.displayAvatarURL();
+  const footerIcon = botAvatar || null;
+
+  const embed = new EmbedBuilder()
+    .setDescription(description)
+    .setColor(0x2b2d31);
+
+  if (footerIcon) {
+    embed.setFooter({ text: footerText, iconURL: footerIcon });
+  } else {
+    embed.setFooter({ text: footerText });
+  }
+
+  return {
+    content: mention,
+    embeds: [embed],
+  };
 }
 
 // Normalisasi tipe key yang tersimpan di API
@@ -1663,6 +1740,83 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: replyText });
       }
 
+      // /sendupdatesc
+      else if (commandName === 'sendupdatesc') {
+        if (!(await ensureOwner())) return;
+
+        if (!interaction.guild) {
+          await interaction.reply({
+            content:
+              'Perintah ini hanya bisa digunakan di dalam server (bukan DM).',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const scriptName = interaction.options.getString('script', true);
+        const status = interaction.options.getString('status', true);
+        const features = interaction.options.getString('features', true);
+        const changelogs = interaction.options.getString('changelogs', true);
+        const nextUpdate =
+          interaction.options.getString('nextupdate', false) || '-';
+        const targetChannelOpt =
+          interaction.options.getChannel('channel', false);
+
+        let targetChannel = null;
+
+        // 1) jika user pilih channel
+        if (
+          targetChannelOpt &&
+          (targetChannelOpt.type === ChannelType.GuildText ||
+            targetChannelOpt.type === ChannelType.GuildAnnouncement)
+        ) {
+          targetChannel = targetChannelOpt;
+        }
+        // 2) kalau ada UPDATE_CHANNEL_ID di env
+        else if (UPDATE_CHANNEL_ID) {
+          const ch = interaction.guild.channels.cache.get(UPDATE_CHANNEL_ID);
+          if (
+            ch &&
+            (ch.type === ChannelType.GuildText ||
+              ch.type === ChannelType.GuildAnnouncement)
+          ) {
+            targetChannel = ch;
+          }
+        }
+        // 3) fallback: channel sekarang
+        if (!targetChannel) {
+          targetChannel = interaction.channel;
+        }
+
+        if (!targetChannel || typeof targetChannel.send !== 'function') {
+          await interaction.reply({
+            content:
+              'Channel tujuan tidak valid untuk mengirim pesan (bukan text/announcement channel).',
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const payload = buildScriptUpdatePayload(
+          {
+            scriptName,
+            status,
+            features,
+            changeLogs: changelogs,
+            nextUpdate,
+          },
+          interaction.guild,
+          client
+        );
+
+        await targetChannel.send(payload);
+
+        await interaction.reply({
+          content: `Pengumuman NEW UPDATE SC sudah dikirim ke ${targetChannel}.`,
+          ephemeral: true,
+        });
+      }
+
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
@@ -1751,133 +1905,6 @@ client.on('interactionCreate', async (interaction) => {
               'Terjadi kesalahan saat mengambil data key dari API. Coba lagi beberapa saat lagi atau hubungi admin.',
           });
         }
-      }
-
-      // /sendupdatesc – kirim NEW UPDATE SC
-      else if (commandName === 'sendupdatesc') {
-        if (!(await ensureOwner())) return;
-
-        const scriptName = interaction.options.getString('script', true);
-        const statusCode = interaction.options.getString('status', true);
-        const featuresRaw = interaction.options.getString('features', true);
-        const changelogsRaw = interaction.options.getString('changelogs', true);
-        const nextUpdateRaw = interaction.options.getString(
-          'nextupdate',
-          false
-        );
-        const channelOpt = interaction.options.getChannel('channel', false);
-
-        let targetChannel = null;
-        if (
-          channelOpt &&
-          channelOpt.type === ChannelType.GuildText
-        ) {
-          targetChannel = channelOpt;
-        } else if (UPDATE_CHANNEL_ID && interaction.guild) {
-          targetChannel =
-            interaction.guild.channels.cache.get(UPDATE_CHANNEL_ID) ||
-            null;
-        }
-        if (!targetChannel) {
-          targetChannel = interaction.channel;
-        }
-
-        // mapping status -> label, emoji, color
-        const statusMap = {
-          working: {
-            label: 'WORKING',
-            emoji: '🟢',
-            color: 0x22c55e,
-          },
-          outdated: {
-            label: 'OUTDATED (BISA DIPAKE)',
-            emoji: '🟡',
-            color: 0xeab308,
-          },
-          not_working: {
-            label: 'NOT WORKING',
-            emoji: '🔴',
-            color: 0xef4444,
-          },
-          need_update: {
-            label: 'NEED UPDATE',
-            emoji: '🛠️',
-            color: 0xf97316,
-          },
-          coming_soon: {
-            label: 'COMING SOON',
-            emoji: '⏳',
-            color: 0x0ea5e9,
-          },
-        };
-
-        const meta = statusMap[statusCode] || statusMap.working;
-
-        const featureLines = parseLines(featuresRaw);
-        const changelogLines = parseLines(changelogsRaw);
-
-        const featuresText = featureLines.length
-          ? featureLines.map((l) => `[✅] ${l}`).join('\n')
-          : '-';
-
-        const changelogText = changelogLines.length
-          ? changelogLines.map((l) => `[+] ${l}`).join('\n')
-          : '-';
-
-        const nextUpdateText =
-          (nextUpdateRaw && nextUpdateRaw.trim()) || '-';
-
-        const wibStr = formatDateWIB(new Date());
-        const guildName = interaction.guild
-          ? interaction.guild.name
-          : 'ExHub';
-
-        const embed = new EmbedBuilder()
-          .setColor(meta.color)
-          .setDescription(
-            '```ini\n' +
-              `[SCRIPT]: ${scriptName}\n` +
-              `[STATUS]: ${meta.label}\n` +
-              '```'
-          )
-          .addFields(
-            {
-              name: 'ℹ️ FEATURES',
-              value: featuresText,
-              inline: false,
-            },
-            {
-              name: 'ℹ️ CHANGE LOGS',
-              value: changelogText,
-              inline: false,
-            },
-            {
-              name: '⏳ NEXT UPDATE',
-              value: nextUpdateText,
-              inline: false,
-            }
-          )
-          .setFooter({
-            text: `${guildName} | Today ${wibStr}`,
-            iconURL: interaction.client.user.displayAvatarURL(),
-          });
-
-        const mention =
-          EVERYONE_ROLE_ID && /^\d+$/.test(EVERYONE_ROLE_ID)
-            ? `<@&${EVERYONE_ROLE_ID}>`
-            : '@everyone';
-
-        const titleLine = `${meta.emoji} NEW UPDATE SC`;
-
-        await targetChannel.send({
-          content: `${mention}\n${titleLine}`,
-          embeds: [embed],
-        });
-
-        await interaction.reply({
-          content: `Update script **${scriptName}** telah dikirim ke ${targetChannel}.`,
-          ephemeral: true,
-        });
       }
 
       return;
@@ -3220,6 +3247,57 @@ const commands = [
       'Refresh nama channel SERVER STATS (All Members, Members, Bots, Boosts)'
     ),
   new SlashCommandBuilder()
+    .setName('sendupdatesc')
+    .setDescription('Kirim pengumuman NEW UPDATE SC untuk suatu script')
+    .addStringOption((opt) =>
+      opt
+        .setName('script')
+        .setDescription('Nama script, misal: SPEAR FISHING / GET FISH')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('status')
+        .setDescription('Status script (WORKING / ONLINE / OFFLINE / dst)')
+        .setRequired(true)
+        .addChoices(
+          { name: 'WORKING', value: 'WORKING' },
+          { name: 'ONLINE', value: 'ONLINE' },
+          { name: 'OFFLINE', value: 'OFFLINE' },
+          { name: 'OUTDATED (BISA DIPAKE)', value: 'OUTDATED (BISA DIPAKE)' }
+        )
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('features')
+        .setDescription(
+          'Daftar fitur (pisah dengan ; atau newline). Contoh: Auto Farm; Auto Skill; ESP Fish'
+        )
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('changelogs')
+        .setDescription(
+          'Daftar change logs (pisah dengan ; atau newline). Contoh: Added Hide Nickname; Added Low Graphic'
+        )
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('nextupdate')
+        .setDescription('Rencana next update (boleh "-" jika belum ada)')
+        .setRequired(false)
+    )
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription(
+          'Channel tujuan pengumuman (kosongkan = pakai UPDATE_CHANNEL_ID atau channel ini)'
+        )
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
     .setName('sendreactionrole')
     .setDescription(
       'Kirim pesan reaction role (multi role, multi emoji, multi channel)'
@@ -3257,61 +3335,142 @@ const commands = [
   new SlashCommandBuilder()
     .setName('checkmykey')
     .setDescription('Alias dari /mykey untuk cek semua paid key kamu'),
-  new SlashCommandBuilder()
-    .setName('sendupdatesc')
-    .setDescription('Kirim pengumuman NEW UPDATE SC ke channel update')
-    .addStringOption((opt) =>
-      opt
-        .setName('script')
-        .setDescription('Nama script, contoh: SPEAR FISHING')
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('status')
-        .setDescription('Status script')
-        .setRequired(true)
-        .addChoices(
-          { name: '🟢 WORKING / ONLINE', value: 'working' },
-          { name: '🟡 OUTDATED (BISA DIPAKE)', value: 'outdated' },
-          { name: '❌ NOT WORKING', value: 'not_working' },
-          { name: '🛠️ NEED UPDATE', value: 'need_update' },
-          { name: '⏳ COMING SOON', value: 'coming_soon' }
-        )
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('features')
-        .setDescription(
-          'Daftar fitur (pisah baris, koma, atau titik koma)'
-        )
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('changelogs')
-        .setDescription(
-          'Daftar change logs (pisah baris, koma, atau titik koma)'
-        )
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('nextupdate')
-        .setDescription('Rencana next update (opsional)')
-        .setRequired(false)
-    )
-    .addChannelOption((opt) =>
-      opt
-        .setName('channel')
-        .setDescription(
-          'Channel tujuan (kosong = UPDATE_CHANNEL_ID / channel ini)'
-        )
-        .setRequired(false)
-    ),
 ].map((c) => c.setDMPermission(false).toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+// ---------- SIMPLE HTTP SERVER UNTUK ADMIN DASHBOARD (opsional) ----------
+// Kirim POST ke /api/new-update-sc dengan body JSON:
+// {
+//   "secret": "ADMIN_UPDATE_SECRET (optional)",
+//   "scriptName": "SPEAR FISHING",
+//   "status": "WORKING",
+//   "features": "Feature 1; Feature 2; Feature 3",
+//   "changeLogs": "Change 1; Change 2",
+//   "nextUpdate": "-",
+//   "channelId": "ID_CHANNEL_TUJUAN (optional, fallback ke UPDATE_CHANNEL_ID)"
+// }
+const HTTP_PORT =
+  process.env.BOT_HTTP_PORT ||
+  process.env.HTTP_PORT ||
+  process.env.PORT ||
+  null;
+
+if (HTTP_PORT) {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/api/new-update-sc') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.socket.destroy();
+        }
+      });
+      req.on('end', async () => {
+        try {
+          const data = body ? JSON.parse(body) : {};
+
+          if (ADMIN_UPDATE_SECRET && data.secret !== ADMIN_UPDATE_SECRET) {
+            res.statusCode = 403;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({ ok: false, error: 'Forbidden (bad secret)' })
+            );
+            return;
+          }
+
+          const scriptName = data.scriptName || data.script || 'UNKNOWN';
+          const status = (data.status || 'WORKING').toString();
+          const features = data.features || '';
+          const changeLogs = data.changeLogs || data.changelogs || '';
+          const nextUpdate = data.nextUpdate || '-';
+          const channelId = data.channelId || UPDATE_CHANNEL_ID;
+
+          if (!channelId) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error:
+                  'channelId tidak diberikan dan UPDATE_CHANNEL_ID belum di-set',
+              })
+            );
+            return;
+          }
+
+          let channel;
+          try {
+            channel = await client.channels.fetch(channelId);
+          } catch (e) {
+            console.error(
+              '[HTTP /api/new-update-sc] Gagal fetch channel:',
+              e
+            );
+          }
+
+          if (
+            !channel ||
+            !(
+              channel.type === ChannelType.GuildText ||
+              channel.type === ChannelType.GuildAnnouncement
+            )
+          ) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: 'Channel tidak valid / bukan text channel',
+              })
+            );
+            return;
+          }
+
+          const guild = channel.guild || null;
+
+          const payload = buildScriptUpdatePayload(
+            {
+              scriptName,
+              status,
+              features,
+              changeLogs,
+              nextUpdate,
+            },
+            guild,
+            client
+          );
+
+          await channel.send(payload);
+
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          console.error(
+            '[HTTP /api/new-update-sc] Internal handler error:',
+            err
+          );
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(
+            JSON.stringify({ ok: false, error: 'Internal server error' })
+          );
+        }
+      });
+    } else {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'Not found' }));
+    }
+  });
+
+  server.listen(HTTP_PORT, () => {
+    console.log(
+      `HTTP control server listening on port ${HTTP_PORT} (route: POST /api/new-update-sc)`
+    );
+  });
+}
 
 (async () => {
   try {
