@@ -193,11 +193,11 @@ function buildRuntimeMessage(client) {
   return msg;
 }
 
-// Pecah string jadi list (pisah newline atau ;)
+// Pecah string jadi list (support newline, ;, atau , sebagai pemisah)
 function splitList(text) {
   if (!text) return [];
   return String(text)
-    .split(/[\n;]+/g)
+    .split(/[\n;,]+/g)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -226,7 +226,7 @@ function formatDateTimeWIB(date = new Date()) {
   return `Today ${day}-${month}-${year} ${hour}:${minute} WIB`;
 }
 
-// Mapping STATUS -> label + warna embed
+// Mapping STATUS -> label + warna embed + emoji header utama
 function mapStatusLabelAndColor(rawStatus) {
   const s = String(rawStatus || '').trim();
 
@@ -234,6 +234,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '[🟢] WORKING / STABLE',
       color: 0x57f287, // hijau
+      headerEmoji: ':green_circle:',
     };
   }
 
@@ -248,6 +249,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '[🟢] WORKING / STABLE',
       color: 0x57f287,
+      headerEmoji: ':green_circle:',
     };
   }
 
@@ -256,6 +258,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '[🟡] OUTDATED (BISA DIPAKE)',
       color: 0xfee75c,
+      headerEmoji: ':yellow_circle:',
     };
   }
 
@@ -264,6 +267,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '❌ NOT WORKING',
       color: 0xed4245,
+      headerEmoji: ':red_circle:',
     };
   }
 
@@ -272,6 +276,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '🛠️ NEED UPDATE',
       color: 0xf39c12,
+      headerEmoji: ':wrench:',
     };
   }
 
@@ -280,6 +285,7 @@ function mapStatusLabelAndColor(rawStatus) {
     return {
       label: '⏳ COMING SOON',
       color: 0x2b2d31,
+      headerEmoji: ':hourglass_flowing_sand:',
     };
   }
 
@@ -287,21 +293,12 @@ function mapStatusLabelAndColor(rawStatus) {
   return {
     label: s,
     color: 0x2b2d31,
+    headerEmoji: ':white_small_square:',
   };
 }
 
 /**
- * Build payload pesan NEW UPDATE SC:
- *
- * :green_circle: **NEW UPDATE SC**
- * [SCRIPT]: ...
- * [STATUS]: [🟢] WORKING / STABLE | [🟡] OUTDATED (BISA DIPAKE) | ❌ ...
- * ℹ️ FEATURES
- * [✅] ...
- * ℹ️ CHANGE LOGS
- * [+] ...
- * :hourglass_flowing_sand: NEXT UPDATE
- * ...
+ * Build payload pesan NEW UPDATE SC (format pakai blok kode + header gaya manual)
  */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
@@ -309,53 +306,83 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   // Status mentah dari slash command / admin form
   const rawStatus = options.status || 'WORKING';
 
-  // Konversi ke label + warna standar
-  const { label: statusLabel, color } = mapStatusLabelAndColor(rawStatus);
+  // Konversi ke label + warna standar + emoji header
+  const { label: statusLabel, color, headerEmoji } =
+    mapStatusLabelAndColor(rawStatus);
 
-  const featuresList = splitList(options.features || '');
-  const changeLogsList = splitList(
-    options.changeLogs || options.changelogs || ''
-  );
-  let nextUpdateList = splitList(options.nextUpdate || '');
+  const featuresRaw = options.features || '';
+  const changeLogsRaw = options.changeLogs || options.changelogs || '';
+  const nextUpdateRaw = options.nextUpdate || '';
+
+  const featuresList = splitList(featuresRaw);
+  const changeLogsList = splitList(changeLogsRaw);
+  let nextUpdateList = splitList(nextUpdateRaw);
 
   if (!nextUpdateList.length) {
     nextUpdateList = ['-'];
   }
 
-  const featureLines =
-    featuresList.length > 0
-      ? featuresList.map((f) => `[✅] ${f}`)
-      : ['(no features listed)'];
+  // Helper: prefix default emoji hanya jika baris belum punya prefix sendiri
+  const formatLines = (list, defaultPrefix) => {
+    if (!list || !list.length) return ['-'];
+    const out = [];
+    for (const raw of list) {
+      const line = String(raw).trim();
+      if (!line) continue;
 
-  const changelogLines =
-    changeLogsList.length > 0
-      ? changeLogsList.map((c) => `[+] ${c}`)
-      : ['-'];
+      // Jika user sudah kasih prefix sendiri (emoji / [..] / bullet), jangan ditambah lagi
+      if (/^([\[\:\-\•\*]|<:)/.test(line)) {
+        out.push(line);
+      } else {
+        out.push(`${defaultPrefix} ${line}`);
+      }
+    }
+    return out.length ? out : ['-'];
+  };
 
-  const nextUpdateText = nextUpdateList.join('\n');
+  const featureLines = formatLines(featuresList, '[✅]');
+  const changelogLines = formatLines(changeLogsList, '[+]');
+  const nextUpdateLines = formatLines(nextUpdateList, '[:track_next:]');
 
   const mention =
     EVERYONE_ROLE_ID && /^\d{5,}$/.test(EVERYONE_ROLE_ID)
       ? `<@&${EVERYONE_ROLE_ID}>`
       : '@everyone';
 
-  const lines = [
-    ':green_circle: **NEW UPDATE SC**',
-    '',
-    `[SCRIPT]: ${scriptName}`,
-    `[STATUS]: ${statusLabel}`,
-    '',
-    'ℹ️ FEATURES',
-    ...featureLines,
-    '',
-    'ℹ️ CHANGE LOGS',
-    ...changelogLines,
-    '',
-    ':hourglass_flowing_sand: NEXT UPDATE',
-    nextUpdateText,
-  ];
+  const descriptionParts = [];
 
-  const description = lines.join('\n');
+  // Header utama
+  const headerStatusEmoji = headerEmoji || ':green_circle:';
+  descriptionParts.push(`**【${headerStatusEmoji} 】NEW UPDATED **`);
+
+  // Block SCRIPT + STATUS
+  descriptionParts.push('```');
+  descriptionParts.push(`[SCRIPT]: ${scriptName}`);
+  descriptionParts.push(`[STATUS]: ${statusLabel}`);
+  descriptionParts.push('```');
+
+  // FEATURES
+  descriptionParts.push('');
+  descriptionParts.push('**【:information_source:】 FEATURES **');
+  descriptionParts.push('```');
+  descriptionParts.push(...featureLines);
+  descriptionParts.push('```');
+
+  // CHANGE LOGS
+  descriptionParts.push('');
+  descriptionParts.push('**【:arrow_up_down: 】 CHANGE LOGS **');
+  descriptionParts.push('```');
+  descriptionParts.push(...changelogLines);
+  descriptionParts.push('```');
+
+  // NEXT UPDATE
+  descriptionParts.push('');
+  descriptionParts.push('**【:hourglass_flowing_sand:】NEXT UPDATE**');
+  descriptionParts.push('```');
+  descriptionParts.push(...nextUpdateLines);
+  descriptionParts.push('```');
+
+  const description = descriptionParts.join('\n');
 
   const guildName = guild ? guild.name : 'ExHub';
   const footerText = `${guildName} | ${formatDateTimeWIB()}`;
@@ -1728,7 +1755,7 @@ client.on('interactionCreate', async (interaction) => {
             .filter(Boolean);
           const seen = new Set();
 
-          for (const token of tokens) {
+        for (const token of tokens) {
             let id = token;
             const m = token.match(/^<#(\d+)>$/);
             if (m) id = m[1];
@@ -3343,7 +3370,7 @@ const commands = [
       opt
         .setName('features')
         .setDescription(
-          'Daftar fitur (pisah dengan ; atau newline). Contoh: Auto Farm; Auto Skill; ESP Fish'
+          'Daftar fitur (pisah dengan koma / ; / newline). Contoh: Auto Farm; Auto Skill; ESP Fish'
         )
         .setRequired(true)
     )
@@ -3351,7 +3378,7 @@ const commands = [
       opt
         .setName('changelogs')
         .setDescription(
-          'Daftar change logs (pisah dengan ; atau newline). Contoh: Added Hide Nickname; Added Low Graphic'
+          'Daftar change logs (pisah dengan koma / ; / newline). Contoh: Added Hide Nickname; Added Low Graphic'
         )
         .setRequired(true)
     )
