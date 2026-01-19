@@ -91,6 +91,10 @@ const WELCOME_CARD_BG_URL =
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
+// Konfigurasi pengumuman NEW UPDATE SC
+const EVERYONE_ROLE_ID = process.env.EVERYONE_ROLE_ID || null;
+const UPDATE_CHANNEL_ID = process.env.UPDATE_CHANNEL_ID || null;
+
 // ---------- SERVER STATS CONFIG --------------------------------
 // Kategori + 4 channel untuk panel "📊 SERVER STATS 📊"
 const SERVER_STATS_CATEGORY_ID = process.env.SERVER_STATS_CATEGORY_ID || null;
@@ -183,6 +187,53 @@ function buildRuntimeMessage(client) {
     `• RAM (Free)    : \`${toGB(freeMemBytes)} GB\``;
 
   return msg;
+}
+
+// Format tanggal ke Waktu Indonesia Barat (Asia/Jakarta)
+function formatDateWIB(date = new Date()) {
+  try {
+    const fmt = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(date);
+    const get = (type) =>
+      parts.find((p) => p.type === type)?.value || '';
+    const day = get('day');
+    const month = get('month');
+    const year = get('year');
+    const hour = get('hour');
+    const minute = get('minute');
+    return `${day}-${month}-${year} ${hour}:${minute} WIB`;
+  } catch (err) {
+    console.error('formatDateWIB error:', err);
+    const d = date;
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const year = d.getUTCFullYear();
+    const hour = String(d.getUTCHours()).padStart(2, '0');
+    const minute = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${day}-${month}-${year} ${hour}:${minute} WIB`;
+  }
+}
+
+// Parse list teks (fitur / changelog) dari string
+function parseLines(raw) {
+  if (!raw) return [];
+  let segments;
+  if (raw.includes('\n')) {
+    segments = raw.split(/\r?\n/);
+  } else if (raw.includes(';')) {
+    segments = raw.split(';');
+  } else {
+    segments = raw.split(',');
+  }
+  return segments.map((s) => s.trim()).filter(Boolean);
 }
 
 // Normalisasi tipe key yang tersimpan di API
@@ -1702,6 +1753,133 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
+      // /sendupdatesc – kirim NEW UPDATE SC
+      else if (commandName === 'sendupdatesc') {
+        if (!(await ensureOwner())) return;
+
+        const scriptName = interaction.options.getString('script', true);
+        const statusCode = interaction.options.getString('status', true);
+        const featuresRaw = interaction.options.getString('features', true);
+        const changelogsRaw = interaction.options.getString('changelogs', true);
+        const nextUpdateRaw = interaction.options.getString(
+          'nextupdate',
+          false
+        );
+        const channelOpt = interaction.options.getChannel('channel', false);
+
+        let targetChannel = null;
+        if (
+          channelOpt &&
+          channelOpt.type === ChannelType.GuildText
+        ) {
+          targetChannel = channelOpt;
+        } else if (UPDATE_CHANNEL_ID && interaction.guild) {
+          targetChannel =
+            interaction.guild.channels.cache.get(UPDATE_CHANNEL_ID) ||
+            null;
+        }
+        if (!targetChannel) {
+          targetChannel = interaction.channel;
+        }
+
+        // mapping status -> label, emoji, color
+        const statusMap = {
+          working: {
+            label: 'WORKING',
+            emoji: '🟢',
+            color: 0x22c55e,
+          },
+          outdated: {
+            label: 'OUTDATED (BISA DIPAKE)',
+            emoji: '🟡',
+            color: 0xeab308,
+          },
+          not_working: {
+            label: 'NOT WORKING',
+            emoji: '🔴',
+            color: 0xef4444,
+          },
+          need_update: {
+            label: 'NEED UPDATE',
+            emoji: '🛠️',
+            color: 0xf97316,
+          },
+          coming_soon: {
+            label: 'COMING SOON',
+            emoji: '⏳',
+            color: 0x0ea5e9,
+          },
+        };
+
+        const meta = statusMap[statusCode] || statusMap.working;
+
+        const featureLines = parseLines(featuresRaw);
+        const changelogLines = parseLines(changelogsRaw);
+
+        const featuresText = featureLines.length
+          ? featureLines.map((l) => `[✅] ${l}`).join('\n')
+          : '-';
+
+        const changelogText = changelogLines.length
+          ? changelogLines.map((l) => `[+] ${l}`).join('\n')
+          : '-';
+
+        const nextUpdateText =
+          (nextUpdateRaw && nextUpdateRaw.trim()) || '-';
+
+        const wibStr = formatDateWIB(new Date());
+        const guildName = interaction.guild
+          ? interaction.guild.name
+          : 'ExHub';
+
+        const embed = new EmbedBuilder()
+          .setColor(meta.color)
+          .setDescription(
+            '```ini\n' +
+              `[SCRIPT]: ${scriptName}\n` +
+              `[STATUS]: ${meta.label}\n` +
+              '```'
+          )
+          .addFields(
+            {
+              name: 'ℹ️ FEATURES',
+              value: featuresText,
+              inline: false,
+            },
+            {
+              name: 'ℹ️ CHANGE LOGS',
+              value: changelogText,
+              inline: false,
+            },
+            {
+              name: '⏳ NEXT UPDATE',
+              value: nextUpdateText,
+              inline: false,
+            }
+          )
+          .setFooter({
+            text: `${guildName} | Today ${wibStr}`,
+            iconURL: interaction.client.user.displayAvatarURL(),
+          });
+
+        const mention =
+          EVERYONE_ROLE_ID && /^\d+$/.test(EVERYONE_ROLE_ID)
+            ? `<@&${EVERYONE_ROLE_ID}>`
+            : '@everyone';
+
+        const titleLine = `${meta.emoji} NEW UPDATE SC`;
+
+        await targetChannel.send({
+          content: `${mention}\n${titleLine}`,
+          embeds: [embed],
+        });
+
+        await interaction.reply({
+          content: `Update script **${scriptName}** telah dikirim ke ${targetChannel}.`,
+          ephemeral: true,
+        });
+      }
+
       return;
     }
 
@@ -1821,7 +1999,11 @@ client.on('interactionCreate', async (interaction) => {
                 : null;
 
               let providerLabel = k.provider || 'unknown';
-              if (providerLabel.includes('work.ink') || providerLabel === 'work.ink' || providerLabel === 'workink') {
+              if (
+                providerLabel.includes('work.ink') ||
+                providerLabel === 'work.ink' ||
+                providerLabel === 'workink'
+              ) {
                 providerLabel = 'Work.ink';
               } else if (providerLabel.includes('linkvertise')) {
                 providerLabel = 'Linkvertise';
@@ -1967,7 +2149,11 @@ client.on('interactionCreate', async (interaction) => {
           const freeByProvider = {};
           for (const k of freeKeys) {
             let prov = k.provider || 'unknown';
-            if (prov.includes('work.ink') || prov === 'work.ink' || prov === 'workink') {
+            if (
+              prov.includes('work.ink') ||
+              prov === 'work.ink' ||
+              prov === 'workink'
+            ) {
               prov = 'Work.ink';
             } else if (prov.includes('linkvertise')) {
               prov = 'Linkvertise';
@@ -2872,10 +3058,7 @@ client.on('interactionCreate', async (interaction) => {
             return;
           }
 
-          if (
-            keyType !== 'month' &&
-            keyType !== 'lifetime'
-          ) {
+          if (keyType !== 'month' && keyType !== 'lifetime') {
             await interaction.editReply({
               content:
                 `⚠️ Key ini bertipe "${info.type}" yang belum didukung redeem otomatis dari panel.\n` +
@@ -3074,6 +3257,58 @@ const commands = [
   new SlashCommandBuilder()
     .setName('checkmykey')
     .setDescription('Alias dari /mykey untuk cek semua paid key kamu'),
+  new SlashCommandBuilder()
+    .setName('sendupdatesc')
+    .setDescription('Kirim pengumuman NEW UPDATE SC ke channel update')
+    .addStringOption((opt) =>
+      opt
+        .setName('script')
+        .setDescription('Nama script, contoh: SPEAR FISHING')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('status')
+        .setDescription('Status script')
+        .setRequired(true)
+        .addChoices(
+          { name: '🟢 WORKING / ONLINE', value: 'working' },
+          { name: '🟡 OUTDATED (BISA DIPAKE)', value: 'outdated' },
+          { name: '❌ NOT WORKING', value: 'not_working' },
+          { name: '🛠️ NEED UPDATE', value: 'need_update' },
+          { name: '⏳ COMING SOON', value: 'coming_soon' }
+        )
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('features')
+        .setDescription(
+          'Daftar fitur (pisah baris, koma, atau titik koma)'
+        )
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('changelogs')
+        .setDescription(
+          'Daftar change logs (pisah baris, koma, atau titik koma)'
+        )
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('nextupdate')
+        .setDescription('Rencana next update (opsional)')
+        .setRequired(false)
+    )
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription(
+          'Channel tujuan (kosong = UPDATE_CHANNEL_ID / channel ini)'
+        )
+        .setRequired(false)
+    ),
 ].map((c) => c.setDMPermission(false).toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
