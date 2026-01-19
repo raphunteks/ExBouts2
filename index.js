@@ -342,18 +342,33 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
 
   const featureLines = formatLines(featuresList, '[✅]');
   const changelogLines = formatLines(changeLogsList, '[+]');
-  const nextUpdateLines = formatLines(nextUpdateList, '[:track_next:]');
+  const nextUpdateLines = formatLines(nextUpdateList, '[⏭️]');
 
-  const mention =
-    EVERYONE_ROLE_ID && /^\d{5,}$/.test(EVERYONE_ROLE_ID)
-      ? `<@&${EVERYONE_ROLE_ID}>`
-      : '@everyone';
+  // ---------- FIX: resolve mention supaya tidak jadi "@@everyone" ----------
+  // Default: gunakan ping @everyone
+  let mention = '@everyone';
+
+  // Jika disediakan EVERYONE_ROLE_ID dan role-nya valid serta NAMANYA tidak diawali '@',
+  // gunakan ping role (<@&ROLE_ID>). Kalau namanya diawali '@' (mis: "@everyone"),
+  // kita tetap fallback ke @everyone supaya tidak jadi "@@everyone".
+  if (
+    EVERYONE_ROLE_ID &&
+    /^\d{5,}$/.test(EVERYONE_ROLE_ID) &&
+    guild &&
+    guild.roles
+  ) {
+    const role = guild.roles.cache.get(EVERYONE_ROLE_ID);
+    if (role && !role.name.startsWith('@')) {
+      mention = `<@&${EVERYONE_ROLE_ID}>`;
+    }
+  }
+  // ------------------------------------------------------------------------
 
   const descriptionParts = [];
 
   // Header utama
   const headerStatusEmoji = headerEmoji || ':green_circle:';
-  descriptionParts.push(`**【${headerStatusEmoji} 】NEW UPDATED **`);
+  descriptionParts.push(`**【${headerStatusEmoji} 】NEW UPDATED**`);
 
   // Block SCRIPT + STATUS
   descriptionParts.push('```');
@@ -363,14 +378,14 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
 
   // FEATURES
   descriptionParts.push('');
-  descriptionParts.push('**【:information_source:】 FEATURES **');
+  descriptionParts.push('**【:information_source:】 FEATURES**');
   descriptionParts.push('```');
   descriptionParts.push(...featureLines);
   descriptionParts.push('```');
 
   // CHANGE LOGS
   descriptionParts.push('');
-  descriptionParts.push('**【:arrow_up_down: 】 CHANGE LOGS **');
+  descriptionParts.push('**【:arrow_up_down: 】 CHANGE LOGS**');
   descriptionParts.push('```');
   descriptionParts.push(...changelogLines);
   descriptionParts.push('```');
@@ -843,6 +858,7 @@ async function logOrder(guild, embed) {
     console.error('Failed to send log order:', err);
   }
 }
+
 
 // ---------- WELCOME CARD HELPER (Canvas) -----------------------
 
