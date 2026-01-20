@@ -30,6 +30,8 @@ const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
 const http = require('http'); // HTTP server untuk integrasi admin dashboard
+const fs = require('fs');      // <-- PENTING: untuk configrole.json
+const path = require('path');  // <-- PENTING: untuk configrole.json path
 
 // ---------- ENV & CONFIG ---------------------------------------
 
@@ -50,6 +52,7 @@ const OWNER_IDS = RAW_OWNER_IDS.split(/[,\s]+/).filter(Boolean);
 // kategori untuk ticket (opsional, bisa null)
 const TICKET_CATEGORY_ID =
   process.env.TICKET_CATEGORY_ID ||
+  process.env.CATTEGORY_TICKETCHANEL_ID ||
   process.env.CATTEGORY_TICKETCHANNEL_ID ||
   null;
 
@@ -118,6 +121,11 @@ const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
+// Lokasi file persistent untuk reaction role
+const REACTION_ROLE_CONFIG_PATH =
+  process.env.REACTION_ROLE_CONFIG_PATH ||
+  path.join(__dirname, 'configrole.json');
+
 // harga default (bisa diubah pakai slash command)
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
@@ -126,10 +134,77 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 // ticketOwners: channelId -> userId
 const ticketOwners = new Map();
 
-// reaction role: messageId -> array { emoji, roleId }
+// reaction role: messageId -> array { emoji, roleId, roleName? }
+// (persisten via configrole.json)
 const reactionRoles = new Map();
+let reactionRoleStore = loadReactionRoleConfig();
+
+// reconstruct Map dari store
+for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
+  if (!Array.isArray(conf) || !conf.length) continue;
+  const normalized = conf
+    .filter(
+      (p) =>
+        p &&
+        typeof p === 'object' &&
+        typeof p.emoji === 'string' &&
+        typeof p.roleId === 'string'
+    )
+    .map((p) => ({
+      emoji: String(p.emoji),
+      roleId: String(p.roleId),
+      roleName: p.roleName ? String(p.roleName) : undefined,
+    }));
+
+  if (normalized.length) {
+    reactionRoles.set(messageId, normalized);
+  }
+}
+
+console.log(
+  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
+);
 
 // ---------- HELPER UTILS ---------------------------------------
+
+// Helper untuk load/simpan config reaction role ke file JSON
+function loadReactionRoleConfig() {
+  try {
+    if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
+      return {};
+    }
+    const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
+    if (!raw.trim()) return {};
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return {};
+    return data;
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal load configrole.json, menggunakan config kosong:',
+      err
+    );
+    return {};
+  }
+}
+
+function saveReactionRoleConfig(store) {
+  try {
+    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(
+      REACTION_ROLE_CONFIG_PATH,
+      JSON.stringify(store, null, 2),
+      'utf8'
+    );
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal menyimpan configrole.json:',
+      err
+    );
+  }
+}
 
 // sekarang support banyak OWNER_ID
 function isOwner(userId) {
@@ -1373,6 +1448,48 @@ client.on('messageReactionRemove', async (reaction, user) => {
   }
 });
 
+// Cleanup config kalau pesan reaction role dihapus
+client.on('messageDelete', (message) => {
+  try {
+    if (!message || !message.id) return;
+    if (!reactionRoles.has(message.id)) return;
+
+    reactionRoles.delete(message.id);
+    if (reactionRoleStore && reactionRoleStore[message.id]) {
+      delete reactionRoleStore[message.id];
+      saveReactionRoleConfig(reactionRoleStore);
+    }
+    console.log(
+      `[ReactionRole] Removed config for deleted message ${message.id}`
+    );
+  } catch (err) {
+    console.error('messageDelete (reaction role cleanup) error:', err);
+  }
+});
+
+client.on('messageDeleteBulk', (messages) => {
+  try {
+    let changed = false;
+    for (const [id] of messages) {
+      if (reactionRoles.has(id)) {
+        reactionRoles.delete(id);
+        if (reactionRoleStore && reactionRoleStore[id]) {
+          delete reactionRoleStore[id];
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      saveReactionRoleConfig(reactionRoleStore);
+      console.log(
+        '[ReactionRole] Cleaned up some reaction-role messages from bulk delete'
+      );
+    }
+  } catch (err) {
+    console.error('messageDeleteBulk (reaction role cleanup) error:', err);
+  }
+});
+
 // ---------- PANEL & TICKET HELPERS -----------------------------
 
 async function sendStorePanel(channel) {
@@ -1997,10 +2114,16 @@ client.on('interactionCreate', async (interaction) => {
             }
           }
 
-          reactionRoles.set(
-            msg.id,
-            parsed.map((p) => ({ emoji: p.emoji, roleId: p.roleId }))
-          );
+          // === PERSISTEN: simpan ke Map & file JSON ===
+          const msgConfig = parsed.map((p) => ({
+            emoji: p.emoji,
+            roleId: p.roleId,
+            roleName: p.roleName,
+          }));
+
+          reactionRoles.set(msg.id, msgConfig);
+          reactionRoleStore[msg.id] = msgConfig;
+          saveReactionRoleConfig(reactionRoleStore);
         }
 
         const uniqueChannels = [
@@ -2283,7 +2406,9 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Order:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+                lines.push(
+                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
+                );
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -2323,7 +2448,9 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Claimed:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+                lines.push(
+                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
+                );
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -3770,7 +3897,7 @@ if (HTTP_PORT) {
   try {
     if (!DISCORD_TOKEN || !CLIENT_ID) {
       console.error(
-        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway.'
+        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway / VPS.'
       );
       return;
     }
