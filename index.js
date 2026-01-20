@@ -58,6 +58,8 @@ const CHANNEL_LOGORDER_ID = process.env.CHANNEL_LOGORDER_ID || null;
 
 // welcome channel (bisa juga diubah via /setwelcomechannel)
 let welcomeChannelId = process.env.WELCOME_CHANNEL_ID || null;
+// leave channel (bisa juga diubah via /setleavechannel)
+let leaveChannelId = process.env.LEAVE_CHANNEL_ID || null;
 
 // role premium untuk Claim Role
 const PAID_ROLE_ID = process.env.PAID_ROLE_ID || null;
@@ -88,6 +90,15 @@ const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
 // background khusus kartu welcome (kalau tidak di-set, fallback ke WELCOME_BG_URL)
 const WELCOME_CARD_BG_URL =
   process.env.WELCOME_CARD_BG_URL || WELCOME_BG_URL || null;
+
+// background untuk leave (fallback ke welcome jika tidak diisi)
+const LEAVE_BG_URL = process.env.LEAVE_BG_URL || WELCOME_BG_URL || null;
+// background khusus kartu leave (fallback ke LEAVE_BG_URL -> WELCOME_CARD_BG_URL)
+const LEAVE_CARD_BG_URL =
+  process.env.LEAVE_CARD_BG_URL ||
+  LEAVE_BG_URL ||
+  WELCOME_CARD_BG_URL ||
+  null;
 
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
@@ -860,7 +871,7 @@ async function logOrder(guild, embed) {
 }
 
 
-// ---------- WELCOME CARD HELPER (Canvas) -----------------------
+// ---------- WELCOME / LEAVE CARD HELPER (Canvas) -----------------------
 
 /**
  * Generate Buffer PNG kartu welcome (avatar + background + teks)
@@ -965,6 +976,121 @@ async function generateWelcomeCard(member) {
 
   ctx.fillStyle = '#ffffff';
   const usernameY = welcomeTextY + 70;
+  ctx.fillText(username, width / 2, usernameY);
+
+  // reset shadow
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  const buffer = await canvas.encode('png');
+  return buffer;
+}
+
+/**
+ * Generate Buffer PNG kartu leave (avatar + background + teks GOODBYE)
+ * @param {import('discord.js').GuildMember} member
+ * @returns {Promise<Buffer>}
+ */
+async function generateLeaveCard(member) {
+  const width = 1262;
+  const height = 576;
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  if (LEAVE_CARD_BG_URL) {
+    try {
+      const bg = await loadImage(LEAVE_CARD_BG_URL);
+      ctx.drawImage(bg, 0, 0, width, height);
+    } catch (err) {
+      console.error('[leave-card] Gagal load background:', err);
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(0, 0, width, height);
+    }
+  } else {
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // Avatar lingkaran
+  const avatarUrl = member.user.displayAvatarURL({
+    extension: 'png',
+    size: 512,
+  });
+
+  let avatar;
+  try {
+    avatar = await loadImage(avatarUrl);
+  } catch (err) {
+    console.error('[leave-card] Gagal load avatar:', err);
+    avatar = null;
+  }
+
+  const avatarRadius = 150;
+  const avatarX = width / 2;
+  const avatarY = height * 0.33;
+
+  if (avatar) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avatarX, avatarY, avatarRadius, 0, Math.PI * 2, true);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(
+      avatar,
+      avatarX - avatarRadius,
+      avatarY - avatarRadius,
+      avatarRadius * 2,
+      avatarRadius * 2
+    );
+    ctx.restore();
+  }
+
+  // Border avatar
+  ctx.beginPath();
+  ctx.arc(avatarX, avatarY, avatarRadius + 8, 0, Math.PI * 2, true);
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = '#ed4245';
+  ctx.stroke();
+
+  // Teks "GOODBYE"
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 4;
+
+  ctx.fillStyle = '#ed4245';
+  ctx.font = 'bold 96px Sans-Serif';
+  const goodbyeTextY = avatarY + avatarRadius + 80;
+  ctx.fillText('GOODBYE', width / 2, goodbyeTextY);
+
+  // Username
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 10;
+
+  const baseUsername =
+    member.user.globalName || member.user.username || 'MEMBER';
+  const username = baseUsername.toUpperCase();
+
+  let fontSize = 54;
+  ctx.font = `bold ${fontSize}px Sans-Serif`;
+  let measured = ctx.measureText(username);
+  const maxWidth = width - 220;
+
+  while (measured.width > maxWidth && fontSize > 26) {
+    fontSize -= 4;
+    ctx.font = `bold ${fontSize}px Sans-Serif`;
+    measured = ctx.measureText(username);
+  }
+
+  ctx.fillStyle = '#ffffff';
+  const usernameY = goodbyeTextY + 70;
   ctx.fillText(username, width / 2, usernameY);
 
   // reset shadow
@@ -1137,8 +1263,41 @@ client.on('guildMemberAdd', async (member) => {
   }
 });
 
+// Leave message + refresh stats (dengan kartu Canvas)
 client.on('guildMemberRemove', async (member) => {
   try {
+    const channelId = leaveChannelId;
+    if (channelId) {
+      const ch = member.guild.channels.cache.get(channelId);
+      if (ch) {
+        let files = [];
+        try {
+          const imgBuffer = await generateLeaveCard(member);
+          const attachment = new AttachmentBuilder(imgBuffer, {
+            name: 'leave-card.png',
+          });
+          files.push(attachment);
+        } catch (err) {
+          console.error('[leave-card] gagal generate kartu:', err);
+        }
+
+        const displayName =
+          member.user.globalName || member.user.username || 'member';
+
+        const emb = new EmbedBuilder()
+          .setDescription(
+            `Selamat tinggal **${displayName}**.\n` +
+              `Terima kasih sudah pernah bergabung di **${member.guild.name}**.`
+          )
+          .setColor(0xed4245);
+
+        await ch.send({
+          embeds: [emb],
+          files: files.length ? files : undefined,
+        });
+      }
+    }
+
     await updateServerStats(member.guild);
   } catch (err) {
     console.error('Error on guildMemberRemove:', err);
@@ -1620,6 +1779,17 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
+      // /setleavechannel
+      else if (commandName === 'setleavechannel') {
+        if (!(await ensureOwner())) return;
+        const ch = interaction.options.getChannel('channel', true);
+        leaveChannelId = ch.id;
+        await interaction.reply({
+          content: `Leave channel di-set ke ${ch}.`,
+          ephemeral: true,
+        });
+      }
+
       // /refreshserverstats
       else if (commandName === 'refreshserverstats') {
         if (!(await ensureOwner())) return;
@@ -1771,7 +1941,7 @@ client.on('interactionCreate', async (interaction) => {
             .filter(Boolean);
           const seen = new Set();
 
-        for (const token of tokens) {
+          for (const token of tokens) {
             let id = token;
             const m = token.match(/^<#(\d+)>$/);
             if (m) id = m[1];
@@ -3349,6 +3519,15 @@ const commands = [
       opt
         .setName('channel')
         .setDescription('Channel tujuan welcome')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('setleavechannel')
+    .setDescription('Set channel untuk leave message')
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription('Channel tujuan leave')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
