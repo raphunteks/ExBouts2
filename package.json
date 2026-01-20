@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Discord bot ExHub Store (Ticket, Premium Key, Indo Hangout, Welcome, Reaction Role)",
   "main": "index.js",
+  "private": true,
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js"
@@ -10,11 +11,11 @@
   "author": "ExHub",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.55",
     "discord.js": "^14.25.1",
-    "dotenv": "^16.4.5",
-    "@napi-rs/canvas": "^0.1.55"
+    "dotenv": "^16.4.5"
   }
 }
