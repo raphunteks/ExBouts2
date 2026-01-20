@@ -1792,7 +1792,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, ephemeral: true });
+          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
         }
       }
 
@@ -1846,7 +1846,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, ephemeral: true });
+          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
         }
       }
 
@@ -1919,7 +1919,7 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
         await updateServerStats(interaction.guild);
         await interaction.editReply({
           content:
@@ -2087,7 +2087,7 @@ client.on('interactionCreate', async (interaction) => {
           targetChannels.push(interaction.channel);
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const createdMessages = [];
         const embedDescription = parsed
@@ -2224,12 +2224,12 @@ client.on('interactionCreate', async (interaction) => {
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
-        await interaction.reply({ content: msg, ephemeral: true });
+        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
       }
 
       // /mykey dan /checkmykey (paid only)
       else if (commandName === 'mykey' || commandName === 'checkmykey') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         try {
           const keys = await fetchUserPaidKeys(interaction.user);
@@ -2354,13 +2354,13 @@ client.on('interactionCreate', async (interaction) => {
           scriptLine +
           '`';
 
-        await interaction.reply({ content: msg, ephemeral: true });
+        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
         return;
       }
 
       // Check Key -> langsung panggil API dan kirim list paid+free
       if (customId === 'control_check_key') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         try {
           const info = await fetchUserKeyInfo(interaction.user);
@@ -2510,7 +2510,7 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const guild = interaction.guild;
         const member = await guild.members.fetch(interaction.user.id);
@@ -2566,7 +2566,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // Get Stats -> ringkasan Total Keys, Paid/Free, Execute, Executor, dll
       if (customId === 'control_get_stats') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         try {
           const info = await fetchUserKeyInfo(interaction.user);
@@ -2690,7 +2690,7 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const guild = interaction.guild;
         const cleanName =
@@ -3072,7 +3072,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // modal input username Roblox
       if (customId === 'modal_roblox_username') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -3199,7 +3199,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // modal redeem key sebulan
       if (customId === 'modal_redeem_key_month') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const rawKey = interaction.fields
           .getTextInputValue('field_key_month')
@@ -3319,7 +3319,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // modal redeem key lifetime
       if (customId === 'modal_redeem_key_life') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const rawKey = interaction.fields
           .getTextInputValue('field_key_life')
@@ -3439,7 +3439,7 @@ client.on('interactionCreate', async (interaction) => {
 
       // modal redeem key via tombol panel (auto detect type)
       if (customId === 'modal_redeem_key_any') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: messageflags.ephemeral, });
 
         const rawKey = interaction.fields
           .getTextInputValue('field_key_any')
