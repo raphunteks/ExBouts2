@@ -1792,10 +1792,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({
-          content: msg,
-            flags: MessageFlags.Ephemeral,
-          });
+          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
         }
       }
 
@@ -1849,10 +1846,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({
-            content: msg,
-            flags: MessageFlags.Ephemeral,
-          });
+          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
         }
       }
 
@@ -2230,10 +2224,8 @@ client.on('interactionCreate', async (interaction) => {
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
-        await interaction.reply({
-          content: msg,
-          flags: MessageFlags.Ephemeral,
-        });
+        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+      }
 
       // /mykey dan /checkmykey (paid only)
       else if (commandName === 'mykey' || commandName === 'checkmykey') {
@@ -2362,10 +2354,8 @@ client.on('interactionCreate', async (interaction) => {
           scriptLine +
           '`';
 
-        await interaction.reply({
-            content: msg,
-            flags: MessageFlags.Ephemeral,
-          });        return;
+        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+        return;
       }
 
       // Check Key -> langsung panggil API dan kirim list paid+free
