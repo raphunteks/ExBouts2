@@ -1677,7 +1677,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!isOwner(interaction.user.id)) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan oleh OWNER bot.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return false;
         }
@@ -1690,7 +1690,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendStorePanel(interaction.channel);
         await interaction.reply({
           content: 'Panel ticket store sudah dikirim di channel ini.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1700,7 +1700,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendControlPanel(interaction.channel, interaction.guild);
         await interaction.reply({
           content: 'Control panel utama sudah dikirim di channel ini.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1711,7 +1711,7 @@ client.on('interactionCreate', async (interaction) => {
         priceKeyMonth = harga;
         await interaction.reply({
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1724,7 +1724,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Lifetime** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1737,7 +1737,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Indo Hangout Premium** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1779,7 +1779,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key sebulan dikirim ke DM ${target}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
 
           if (
@@ -1833,7 +1833,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key lifetime dikirim ke DM ${target}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
 
           if (
@@ -1892,7 +1892,7 @@ client.on('interactionCreate', async (interaction) => {
         welcomeChannelId = ch.id;
         await interaction.reply({
           content: `Welcome channel di-set ke ${ch}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1903,7 +1903,7 @@ client.on('interactionCreate', async (interaction) => {
         leaveChannelId = ch.id;
         await interaction.reply({
           content: `Leave channel di-set ke ${ch}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -1913,7 +1913,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan di dalam server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -1955,7 +1955,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Config kosong. Contoh: `🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2045,7 +2045,7 @@ client.on('interactionCreate', async (interaction) => {
             content:
               'Tidak ada pasangan emoji–role yang valid.\n' +
               'Contoh penggunaan: `/sendreactionrole config: 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2079,7 +2079,7 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({
               content:
                 'Tidak ada channel valid dan perintah tidak dijalankan di text channel. Periksa opsi `channels`.',
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral
             });
             return;
           }
@@ -2151,7 +2151,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Perintah ini hanya bisa digunakan di dalam server (bukan DM).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2195,7 +2195,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Channel tujuan tidak valid untuk mengirim pesan (bukan text/announcement channel).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2216,7 +2216,7 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({
           content: `Pengumuman NEW UPDATE SC sudah dikirim ke ${targetChannel}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -2485,7 +2485,7 @@ client.on('interactionCreate', async (interaction) => {
             'Reset HWID saat ini masih dilakukan secara manual lewat ticket.\n' +
             'Buka ticket, sertakan username Roblox dan bukti pembelian, lalu minta admin untuk reset HWID.\n' +
             'Jika nanti ada API reset HWID, tombol ini bisa dihubungkan langsung ke sistem tersebut.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -2495,7 +2495,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di dalam server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2504,7 +2504,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'PAID_ROLE_ID belum dikonfigurasi di .env. Minta admin untuk mengisi ID role premium.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2684,7 +2684,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2783,14 +2783,14 @@ client.on('interactionCreate', async (interaction) => {
         ) {
           await interaction.reply({
             content: 'Hanya pembuat ticket yang bisa membatalkan order ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan dihapus dalam 3 detik...',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
 
         setTimeout(() => {
@@ -2813,14 +2813,14 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya admin / owner yang dapat menutup ticket ini (Close Ticket).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan ditutup (channel dihapus) dalam 3 detik...',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
 
         setTimeout(() => {
@@ -2841,7 +2841,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat menginput ulang username Roblox.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2873,7 +2873,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat mengkonfirmasi username ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -2967,7 +2967,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -3568,7 +3568,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: 'Terjadi error internal saat memproses perintah.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral
         });
       }
     } catch (_) {}
