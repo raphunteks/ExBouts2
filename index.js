@@ -1908,13 +1908,14 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
+
       // /refreshserverstats
       else if (commandName === 'refreshserverstats') {
         if (!(await ensureOwner())) return;
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan di dalam server.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
