@@ -24,15 +24,12 @@ const {
   ChannelType,
   AttachmentBuilder,
   Events,
-  MessageFlags, // <- ini WAJIB ada
 } = require('discord.js');
 
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
 const http = require('http'); // HTTP server untuk integrasi admin dashboard
-const fs = require('fs');      // <-- PENTING: untuk configrole.json
-const path = require('path');  // <-- PENTING: untuk configrole.json path
 
 // ---------- ENV & CONFIG ---------------------------------------
 
@@ -53,7 +50,6 @@ const OWNER_IDS = RAW_OWNER_IDS.split(/[,\s]+/).filter(Boolean);
 // kategori untuk ticket (opsional, bisa null)
 const TICKET_CATEGORY_ID =
   process.env.TICKET_CATEGORY_ID ||
-  process.env.CATTEGORY_TICKETCHANEL_ID ||
   process.env.CATTEGORY_TICKETCHANNEL_ID ||
   null;
 
@@ -122,11 +118,6 @@ const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
-// Lokasi file persistent untuk reaction role
-const REACTION_ROLE_CONFIG_PATH =
-  process.env.REACTION_ROLE_CONFIG_PATH ||
-  path.join(__dirname, 'configrole.json');
-
 // harga default (bisa diubah pakai slash command)
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
@@ -135,77 +126,10 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 // ticketOwners: channelId -> userId
 const ticketOwners = new Map();
 
-// reaction role: messageId -> array { emoji, roleId, roleName? }
-// (persisten via configrole.json)
+// reaction role: messageId -> array { emoji, roleId }
 const reactionRoles = new Map();
-let reactionRoleStore = loadReactionRoleConfig();
-
-// reconstruct Map dari store
-for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
-  if (!Array.isArray(conf) || !conf.length) continue;
-  const normalized = conf
-    .filter(
-      (p) =>
-        p &&
-        typeof p === 'object' &&
-        typeof p.emoji === 'string' &&
-        typeof p.roleId === 'string'
-    )
-    .map((p) => ({
-      emoji: String(p.emoji),
-      roleId: String(p.roleId),
-      roleName: p.roleName ? String(p.roleName) : undefined,
-    }));
-
-  if (normalized.length) {
-    reactionRoles.set(messageId, normalized);
-  }
-}
-
-console.log(
-  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
-);
 
 // ---------- HELPER UTILS ---------------------------------------
-
-// Helper untuk load/simpan config reaction role ke file JSON
-function loadReactionRoleConfig() {
-  try {
-    if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
-      return {};
-    }
-    const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
-    if (!raw.trim()) return {};
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return {};
-    return data;
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal load configrole.json, menggunakan config kosong:',
-      err
-    );
-    return {};
-  }
-}
-
-function saveReactionRoleConfig(store) {
-  try {
-    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(
-      REACTION_ROLE_CONFIG_PATH,
-      JSON.stringify(store, null, 2),
-      'utf8'
-    );
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal menyimpan configrole.json:',
-      err
-    );
-  }
-}
 
 // sekarang support banyak OWNER_ID
 function isOwner(userId) {
@@ -1449,48 +1373,6 @@ client.on('messageReactionRemove', async (reaction, user) => {
   }
 });
 
-// Cleanup config kalau pesan reaction role dihapus
-client.on('messageDelete', (message) => {
-  try {
-    if (!message || !message.id) return;
-    if (!reactionRoles.has(message.id)) return;
-
-    reactionRoles.delete(message.id);
-    if (reactionRoleStore && reactionRoleStore[message.id]) {
-      delete reactionRoleStore[message.id];
-      saveReactionRoleConfig(reactionRoleStore);
-    }
-    console.log(
-      `[ReactionRole] Removed config for deleted message ${message.id}`
-    );
-  } catch (err) {
-    console.error('messageDelete (reaction role cleanup) error:', err);
-  }
-});
-
-client.on('messageDeleteBulk', (messages) => {
-  try {
-    let changed = false;
-    for (const [id] of messages) {
-      if (reactionRoles.has(id)) {
-        reactionRoles.delete(id);
-        if (reactionRoleStore && reactionRoleStore[id]) {
-          delete reactionRoleStore[id];
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      saveReactionRoleConfig(reactionRoleStore);
-      console.log(
-        '[ReactionRole] Cleaned up some reaction-role messages from bulk delete'
-      );
-    }
-  } catch (err) {
-    console.error('messageDeleteBulk (reaction role cleanup) error:', err);
-  }
-});
-
 // ---------- PANEL & TICKET HELPERS -----------------------------
 
 async function sendStorePanel(channel) {
@@ -1678,7 +1560,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!isOwner(interaction.user.id)) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan oleh OWNER bot.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return false;
         }
@@ -1691,7 +1573,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendStorePanel(interaction.channel);
         await interaction.reply({
           content: 'Panel ticket store sudah dikirim di channel ini.',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1701,7 +1583,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendControlPanel(interaction.channel, interaction.guild);
         await interaction.reply({
           content: 'Control panel utama sudah dikirim di channel ini.',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1712,7 +1594,7 @@ client.on('interactionCreate', async (interaction) => {
         priceKeyMonth = harga;
         await interaction.reply({
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1725,7 +1607,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Lifetime** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1738,7 +1620,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Indo Hangout Premium** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1780,7 +1662,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key sebulan dikirim ke DM ${target}.`,
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
 
           if (
@@ -1792,7 +1674,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: msg, ephemeral: true });
         }
       }
 
@@ -1834,7 +1716,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key lifetime dikirim ke DM ${target}.`,
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
 
           if (
@@ -1846,7 +1728,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: msg, ephemeral: true });
         }
       }
 
@@ -1893,7 +1775,7 @@ client.on('interactionCreate', async (interaction) => {
         welcomeChannelId = ch.id;
         await interaction.reply({
           content: `Welcome channel di-set ke ${ch}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
@@ -1904,10 +1786,9 @@ client.on('interactionCreate', async (interaction) => {
         leaveChannelId = ch.id;
         await interaction.reply({
           content: `Leave channel di-set ke ${ch}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
-
 
       // /refreshserverstats
       else if (commandName === 'refreshserverstats') {
@@ -1957,7 +1838,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Config kosong. Contoh: `🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2047,7 +1928,7 @@ client.on('interactionCreate', async (interaction) => {
             content:
               'Tidak ada pasangan emoji–role yang valid.\n' +
               'Contoh penggunaan: `/sendreactionrole config: 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2081,7 +1962,7 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({
               content:
                 'Tidak ada channel valid dan perintah tidak dijalankan di text channel. Periksa opsi `channels`.',
-              flags: MessageFlags.Ephemeral
+              ephemeral: true,
             });
             return;
           }
@@ -2116,16 +1997,10 @@ client.on('interactionCreate', async (interaction) => {
             }
           }
 
-          // === PERSISTEN: simpan ke Map & file JSON ===
-          const msgConfig = parsed.map((p) => ({
-            emoji: p.emoji,
-            roleId: p.roleId,
-            roleName: p.roleName,
-          }));
-
-          reactionRoles.set(msg.id, msgConfig);
-          reactionRoleStore[msg.id] = msgConfig;
-          saveReactionRoleConfig(reactionRoleStore);
+          reactionRoles.set(
+            msg.id,
+            parsed.map((p) => ({ emoji: p.emoji, roleId: p.roleId }))
+          );
         }
 
         const uniqueChannels = [
@@ -2153,7 +2028,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Perintah ini hanya bisa digunakan di dalam server (bukan DM).',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2197,7 +2072,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Channel tujuan tidak valid untuk mengirim pesan (bukan text/announcement channel).',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2218,14 +2093,14 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({
           content: `Pengumuman NEW UPDATE SC sudah dikirim ke ${targetChannel}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
 
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
-        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: msg, ephemeral: true });
       }
 
       // /mykey dan /checkmykey (paid only)
@@ -2355,7 +2230,7 @@ client.on('interactionCreate', async (interaction) => {
           scriptLine +
           '`';
 
-        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: msg, ephemeral: true });
         return;
       }
 
@@ -2408,9 +2283,7 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Order:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(
-                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
-                );
+                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -2450,9 +2323,7 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Claimed:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(
-                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
-                );
+                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -2487,7 +2358,7 @@ client.on('interactionCreate', async (interaction) => {
             'Reset HWID saat ini masih dilakukan secara manual lewat ticket.\n' +
             'Buka ticket, sertakan username Roblox dan bukti pembelian, lalu minta admin untuk reset HWID.\n' +
             'Jika nanti ada API reset HWID, tombol ini bisa dihubungkan langsung ke sistem tersebut.',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
         return;
       }
@@ -2497,7 +2368,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di dalam server.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2506,7 +2377,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'PAID_ROLE_ID belum dikonfigurasi di .env. Minta admin untuk mengisi ID role premium.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2686,7 +2557,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di server.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2785,14 +2656,14 @@ client.on('interactionCreate', async (interaction) => {
         ) {
           await interaction.reply({
             content: 'Hanya pembuat ticket yang bisa membatalkan order ini.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan dihapus dalam 3 detik...',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
 
         setTimeout(() => {
@@ -2815,14 +2686,14 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya admin / owner yang dapat menutup ticket ini (Close Ticket).',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan ditutup (channel dihapus) dalam 3 detik...',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
 
         setTimeout(() => {
@@ -2843,7 +2714,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat menginput ulang username Roblox.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2875,7 +2746,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat mengkonfirmasi username ini.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -2969,7 +2840,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            flags: MessageFlags.Ephemeral
+            ephemeral: true,
           });
           return;
         }
@@ -3570,7 +3441,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: 'Terjadi error internal saat memproses perintah.',
-          flags: MessageFlags.Ephemeral
+          ephemeral: true,
         });
       }
     } catch (_) {}
@@ -3899,7 +3770,7 @@ if (HTTP_PORT) {
   try {
     if (!DISCORD_TOKEN || !CLIENT_ID) {
       console.error(
-        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway / VPS.'
+        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway.'
       );
       return;
     }
