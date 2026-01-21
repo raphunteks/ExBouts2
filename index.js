@@ -1792,7 +1792,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+          await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
         }
       }
 
@@ -1846,7 +1846,7 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+          await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
         }
       }
 
@@ -2224,7 +2224,7 @@ client.on('interactionCreate', async (interaction) => {
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
-        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
       }
 
       // /mykey dan /checkmykey (paid only)
@@ -2354,7 +2354,7 @@ client.on('interactionCreate', async (interaction) => {
           scriptLine +
           '`';
 
-        await interaction.reply({ content: msg, flags: messageflags.ephemeral, });
+        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
         return;
       }
 
