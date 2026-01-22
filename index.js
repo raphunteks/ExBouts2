@@ -1379,7 +1379,7 @@ async function sendStorePanel(channel) {
   const embed = new EmbedBuilder()
     .setTitle('🎮 EXHUB STORE - Premium Scripts')
     .setDescription(
-      'Halo! Selamat datang di **EXHUB STORE** 👋\n\n' +
+      'Halo! Selamat datang di **EXHUB BETA** 👋\n\n' +
         'Kamu lagi cari script Roblox premium? Kamu datang ke tempat yang tepat!\n\n' +
         '✨ Script oke\n' +
         '💰 Harga bersahabat di kantong\n' +
@@ -1473,10 +1473,10 @@ async function sendTicketIntroMessage(channel, user) {
     '**Paket Tersedia**',
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (Akses 5 Script • 30 hari)`,
+    )} (Akses 1 Script • 30 hari)`,
     `🔥 Key Lifetime – Rp ${formatRupiah(
       priceKeyLifetime
-    )} (Akses 5 Script • 1 tahun)`,
+    )} (Akses 1 Script • 1 tahun)`,
     `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
       priceIndoHangout
     )} (1 Username • Permanent)`,
@@ -1503,7 +1503,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Sebulan',
         description: `Rp ${formatRupiah(
           priceKeyMonth
-        )} • 5 Script Premium (30 hari)`,
+        )} • 1 Script Premium (30 hari)`,
         value: 'KEY_MONTH',
         emoji: '⚡',
       },
@@ -1511,7 +1511,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Lifetime',
         description: `Rp ${formatRupiah(
           priceKeyLifetime
-        )} • 5 Script Premium (1 tahun)`,
+        )} • 1 Script Premium (1 tahun)`,
         value: 'KEY_LIFE',
         emoji: '🔥',
       },
