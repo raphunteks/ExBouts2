@@ -24,6 +24,7 @@ const {
   ChannelType,
   AttachmentBuilder,
   Events,
+  MessageFlags, // <- ini WAJIB ada
 } = require('discord.js');
 
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
