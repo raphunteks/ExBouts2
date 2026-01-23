@@ -29,7 +29,6 @@ const {
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
-const http = require('http'); // HTTP server untuk integrasi admin dashboard
 
 // ---------- ENV & CONFIG ---------------------------------------
 
@@ -81,6 +80,9 @@ const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
+// endpoint reset HWID (HARUS Anda isi ke route serverv2.js)
+const RESET_HWID_API_URL = process.env.RESET_HWID_API_URL || null;
+
 // endpoint script & dashboard (opsional, untuk tombol panel kontrol)
 const EXHUB_SCRIPT_URL = process.env.EXHUB_SCRIPT_URL || null;
 const EXHUB_DASHBOARD_URL = process.env.EXHUB_DASHBOARD_URL || null;
@@ -103,11 +105,11 @@ const LEAVE_CARD_BG_URL =
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
-// role yang akan di-mention untuk NEW UPDATE SC + channel default
+// role yang akan di-mention untuk NEW UPDATE SC + channel default (untuk /sendupdatesc)
 const EVERYONE_ROLE_ID =
   process.env.EVERYONE_ROLE_ID || '1462774806079340574';
 const UPDATE_CHANNEL_ID = process.env.UPDATE_CHANNEL_ID || null;
-// Secret optional untuk API HTTP admin (jika diisi, wajib dikirim dari serverv2.js)
+// Secret optional (digunakan juga untuk proteksi API reset HWID jika Anda mau)
 const ADMIN_UPDATE_SECRET = process.env.ADMIN_UPDATE_SECRET || null;
 
 // ---------- SERVER STATS CONFIG --------------------------------
@@ -163,7 +165,7 @@ function buildRuntimeMessage(client) {
 
   const mem = process.memoryUsage();
   const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
-  const toGB = (bytes) => (bytes / 1024 / 1024 / 1024).toFixed(2);
+  const toGB = (bytes / 1024 / 1024 / 1024).toFixed(2);
 
   const guildCount = client.guilds.cache.size;
 
@@ -310,6 +312,7 @@ function mapStatusLabelAndColor(rawStatus) {
 
 /**
  * Build payload pesan NEW UPDATE SC (format pakai blok kode + header gaya manual)
+ * Dipakai oleh slash command /sendupdatesc (bukan API lagi).
  */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
@@ -355,13 +358,9 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   const changelogLines = formatLines(changeLogsList, '[+]');
   const nextUpdateLines = formatLines(nextUpdateList, '[⏭️]');
 
-  // ---------- FIX: resolve mention supaya tidak jadi "@@everyone" ----------
-  // Default: gunakan ping @everyone
+  // ---------- resolve mention supaya tidak jadi "@@everyone" ----------
   let mention = '@everyone';
 
-  // Jika disediakan EVERYONE_ROLE_ID dan role-nya valid serta NAMANYA tidak diawali '@',
-  // gunakan ping role (<@&ROLE_ID>). Kalau namanya diawali '@' (mis: "@everyone"),
-  // kita tetap fallback ke @everyone supaya tidak jadi "@@everyone".
   if (
     EVERYONE_ROLE_ID &&
     /^\d{5,}$/.test(EVERYONE_ROLE_ID) &&
@@ -869,7 +868,6 @@ async function logOrder(guild, embed) {
     console.error('Failed to send log order:', err);
   }
 }
-
 
 // ---------- WELCOME / LEAVE CARD HELPER (Canvas) -----------------------
 
@@ -2020,7 +2018,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: replyText });
       }
 
-      // /sendupdatesc
+      // /sendupdatesc (manual, bukan via HTTP API lagi)
       else if (commandName === 'sendupdatesc') {
         if (!(await ensureOwner())) return;
 
@@ -2352,14 +2350,31 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      // Reset HWID -> modal, lalu call API serverv2.js
       if (customId === 'control_reset_hwid') {
-        await interaction.reply({
-          content:
-            'Reset HWID saat ini masih dilakukan secara manual lewat ticket.\n' +
-            'Buka ticket, sertakan username Roblox dan bukti pembelian, lalu minta admin untuk reset HWID.\n' +
-            'Jika nanti ada API reset HWID, tombol ini bisa dihubungkan langsung ke sistem tersebut.',
-          ephemeral: true,
-        });
+        const modal = new ModalBuilder()
+          .setCustomId('modal_reset_hwid')
+          .setTitle('Reset HWID Paid Key');
+
+        const inputKey = new TextInputBuilder()
+          .setCustomId('field_reset_key')
+          .setLabel('Masukkan Paid Key yang ingin di-reset HWID-nya')
+          .setPlaceholder('EXHUBPAID-XXXX-XXXX-XXXX')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const inputReason = new TextInputBuilder()
+          .setCustomId('field_reset_reason')
+          .setLabel('Alasan Reset HWID (opsional)')
+          .setPlaceholder('Contoh: Ganti device / install ulang Windows')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false);
+
+        const row1 = new ActionRowBuilder().addComponents(inputKey);
+        const row2 = new ActionRowBuilder().addComponents(inputReason);
+
+        modal.addComponents(row1, row2);
+        await interaction.showModal(modal);
         return;
       }
 
@@ -3433,7 +3448,137 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      // modal reset HWID
+      if (customId === 'modal_reset_hwid') {
+        // (fallback safety; idealnya tidak pernah masuk sini, karena ini ID modal, bukan button)
+        return;
+      }
+
       return;
+    }
+
+    // MODAL SUBMIT untuk Reset HWID
+    if (interaction.isModalSubmit()) {
+      const { customId } = interaction;
+
+      if (customId === 'modal_reset_hwid') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const rawKey = interaction.fields
+          .getTextInputValue('field_reset_key')
+          .trim();
+        const reasonRaw = interaction.fields
+          .getTextInputValue('field_reset_reason')
+          .trim();
+
+        if (!rawKey) {
+          await interaction.editReply({
+            content: 'Key tidak boleh kosong.',
+          });
+          return;
+        }
+
+        const key = rawKey.toUpperCase();
+        const reason =
+          reasonRaw || 'Reset HWID via Discord Control Panel (ExHub)';
+
+        try {
+          if (!RESET_HWID_API_URL) {
+            await interaction.editReply({
+              content:
+                'Fitur reset HWID belum dikonfigurasi di sisi server.\nMinta admin untuk mengisi `RESET_HWID_API_URL` di `.env` bot dan menyiapkan endpoint di serverv2.js.',
+            });
+            return;
+          }
+
+          // Pastikan key ini memang milik akun Discord yang meminta reset
+          let ownedKey = null;
+          try {
+            const paidKeys = await fetchUserPaidKeys(interaction.user);
+            ownedKey = paidKeys.find(
+              (k) => String(k.token).toUpperCase() === key
+            );
+          } catch (e) {
+            console.warn(
+              '[reset-hwid] Gagal cek kepemilikan key (user-info). Lanjutkan, akan divalidasi lagi di server.',
+              e
+            );
+          }
+
+          if (!ownedKey) {
+            // Masih boleh lanjut, tapi kita beri warning
+            await interaction.followUp({
+              content:
+                '⚠️ Peringatan: key tersebut tidak tercatat sebagai paid key milik akun Discord ini di API user-info.\n' +
+                'Jika tetap ingin melanjutkan, admin di server mungkin akan mengecek manual berdasarkan log.',
+              ephemeral: true,
+            });
+          }
+
+          const payload = {
+            key,
+            keyToken: key,
+            discordId: interaction.user.id,
+            discordTag: interaction.user.tag || interaction.user.username,
+            ownerDiscordId: interaction.user.id,
+            reason,
+            source: 'discord-bot-reset-hwid',
+          };
+
+          if (ownedKey && ownedKey.type) {
+            payload.type = ownedKey.type;
+          }
+          if (ADMIN_UPDATE_SECRET) {
+            payload.secret = ADMIN_UPDATE_SECRET;
+          }
+
+          const res = await fetch(RESET_HWID_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          const text = await res.text();
+          let data = null;
+          try {
+            data = JSON.parse(text);
+          } catch (_) {
+            // jika bukan JSON, biarkan null
+          }
+
+          if (!res.ok || (data && data.ok === false)) {
+            const errorMessage =
+              (data &&
+                (data.error ||
+                  data.message ||
+                  data.robloxLockMessage)) ||
+              `Gagal reset HWID (HTTP ${res.status}).`;
+
+            await interaction.editReply({
+              content: `❌ Reset HWID gagal.\n${errorMessage}`,
+            });
+            return;
+          }
+
+          const successMessage =
+            (data &&
+              (data.message ||
+                data.robloxLockMessage)) ||
+            'Reset HWID berhasil. Silakan jalankan ulang ExHub Panel di device baru Anda.';
+
+          await interaction.editReply({
+            content: `✅ ${successMessage}`,
+          });
+        } catch (err) {
+          console.error('[reset-hwid] error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat menghubungi server reset HWID. Coba lagi beberapa saat lagi atau hubungi admin.',
+          });
+        }
+
+        return;
+      }
     }
   } catch (err) {
     console.error('interactionCreate error:', err);
@@ -3632,139 +3777,6 @@ const commands = [
 ].map((c) => c.setDMPermission(false).toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-
-// ---------- SIMPLE HTTP SERVER UNTUK ADMIN DASHBOARD (opsional) ----------
-// Kirim POST ke /api/new-update-sc dengan body JSON:
-// {
-//   "secret": "ADMIN_UPDATE_SECRET (optional)",
-//   "scriptName": "SPEAR FISHING",
-//   "status": "WORKING",
-//   "features": "Feature 1; Feature 2; Feature 3",
-//   "changeLogs": "Change 1; Change 2",
-//   "nextUpdate": "-",
-//   "channelId": "ID_CHANNEL_TUJUAN (optional, fallback ke UPDATE_CHANNEL_ID)"
-// }
-const HTTP_PORT =
-  process.env.BOT_HTTP_PORT ||
-  process.env.HTTP_PORT ||
-  process.env.PORT ||
-  null;
-
-if (HTTP_PORT) {
-  const server = http.createServer((req, res) => {
-    if (req.method === 'POST' && req.url === '/api/new-update-sc') {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 1e6) {
-          req.socket.destroy();
-        }
-      });
-      req.on('end', async () => {
-        try {
-          const data = body ? JSON.parse(body) : {};
-
-          if (ADMIN_UPDATE_SECRET && data.secret !== ADMIN_UPDATE_SECRET) {
-            res.statusCode = 403;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(
-              JSON.stringify({ ok: false, error: 'Forbidden (bad secret)' })
-            );
-            return;
-          }
-
-          const scriptName = data.scriptName || data.script || 'UNKNOWN';
-          const status = (data.status || 'WORKING').toString();
-          const features = data.features || '';
-          const changeLogs = data.changeLogs || data.changelogs || '';
-          const nextUpdate = data.nextUpdate || '-';
-          const channelId = data.channelId || UPDATE_CHANNEL_ID;
-
-          if (!channelId) {
-            res.statusCode = 400;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(
-              JSON.stringify({
-                ok: false,
-                error:
-                  'channelId tidak diberikan dan UPDATE_CHANNEL_ID belum di-set',
-              })
-            );
-            return;
-          }
-
-          let channel;
-          try {
-            channel = await client.channels.fetch(channelId);
-          } catch (e) {
-            console.error(
-              '[HTTP /api/new-update-sc] Gagal fetch channel:',
-              e
-            );
-          }
-
-          if (
-            !channel ||
-            !(
-              channel.type === ChannelType.GuildText ||
-              channel.type === ChannelType.GuildAnnouncement
-            )
-          ) {
-            res.statusCode = 400;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(
-              JSON.stringify({
-                ok: false,
-                error: 'Channel tidak valid / bukan text channel',
-              })
-            );
-            return;
-          }
-
-          const guild = channel.guild || null;
-
-          const payload = buildScriptUpdatePayload(
-            {
-              scriptName,
-              status,
-              features,
-              changeLogs,
-              nextUpdate,
-            },
-            guild,
-            client
-          );
-
-          await channel.send(payload);
-
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err) {
-          console.error(
-            '[HTTP /api/new-update-sc] Internal handler error:',
-            err
-          );
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(
-            JSON.stringify({ ok: false, error: 'Internal server error' })
-          );
-        }
-      });
-    } else {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok: false, error: 'Not found' }));
-    }
-  });
-
-  server.listen(HTTP_PORT, () => {
-    console.log(
-      `HTTP control server listening on port ${HTTP_PORT} (route: POST /api/new-update-sc)`
-    );
-  });
-}
 
 (async () => {
   try {
