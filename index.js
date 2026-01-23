@@ -1,8 +1,3 @@
-// index.js
-// =====================================================
-//  ExHub Store / Ticket Bot (single file, Railway ready)
-// =====================================================
-
 require('dotenv').config();
 
 const {
@@ -24,24 +19,19 @@ const {
   ChannelType,
   AttachmentBuilder,
   Events,
-  MessageFlags, // <- ini WAJIB ada
+  MessageFlags,
 } = require('discord.js');
 
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
-const os = require('os'); // untuk /runtime spesifikasi VPS
-const fs = require('fs');      // <-- PENTING: untuk configrole.json
-const path = require('path');  // <-- PENTING: untuk configrole.json path
-
-// ---------- ENV & CONFIG ---------------------------------------
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-
-// Waktu start bot (dipakai /runtime)
 const BOT_START_TIME = Date.now();
 
-// OWNER_IDS bisa dari OWNER_IDS atau OWNER_ID (comma / spasi dipisah)
 const RAW_OWNER_IDS =
   process.env.OWNER_IDS ||
   process.env.OWNER_ID ||
@@ -49,100 +39,76 @@ const RAW_OWNER_IDS =
 
 const OWNER_IDS = RAW_OWNER_IDS.split(/[,\s]+/).filter(Boolean);
 
-// kategori untuk ticket (opsional, bisa null)
 const TICKET_CATEGORY_ID =
   process.env.TICKET_CATEGORY_ID ||
   process.env.CATTEGORY_TICKETCHANEL_ID ||
   process.env.CATTEGORY_TICKETCHANNEL_ID ||
   null;
 
-// channel log order (opsional)
 const CHANNEL_LOGORDER_ID = process.env.CHANNEL_LOGORDER_ID || null;
+const LOGPAID_CHANNEL_ID = process.env.LOGPAID_CHANNEL_ID || null;
 
-// welcome channel (bisa juga diubah via /setwelcomechannel)
 let welcomeChannelId = process.env.WELCOME_CHANNEL_ID || null;
-// leave channel (bisa juga diubah via /setleavechannel)
 let leaveChannelId = process.env.LEAVE_CHANNEL_ID || null;
 
-// role premium untuk Claim Role
 const PAID_ROLE_ID = process.env.PAID_ROLE_ID || null;
-// channel order-paid untuk pesan error Claim Role
 const ORDER_PAID_CHANNEL_ID = process.env.ORDER_PAID_CHANNEL_ID || null;
 
-// URL dasar validasi key (default ke API kamu)
 const PAIDKEY_VALIDATE_BASE =
   process.env.PAIDKEY_VALIDATE_BASE ||
   'https://exc-webs.vercel.app/api/paidkey/isValidate';
 
-// endpoint untuk create/simpan key di API
 const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
   'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
 
-// endpoint untuk ambil semua key + stats milik user (paid + free)
 const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
-// endpoint reset HWID (serverv2.js)
 const RESET_HWID_API_URL =
   process.env.RESET_HWID_API_URL ||
   null;
 
-// endpoint script & dashboard (opsional, untuk tombol panel kontrol)
 const EXHUB_SCRIPT_URL = process.env.EXHUB_SCRIPT_URL || null;
 const EXHUB_DASHBOARD_URL = process.env.EXHUB_DASHBOARD_URL || null;
 
-// background untuk welcome (gambar 700x250 / HD yang kamu host)
 const WELCOME_BG_URL = process.env.WELCOME_BG_URL || null;
-// background khusus kartu welcome (kalau tidak di-set, fallback ke WELCOME_BG_URL)
 const WELCOME_CARD_BG_URL =
   process.env.WELCOME_CARD_BG_URL || WELCOME_BG_URL || null;
 
-// background untuk leave (fallback ke welcome jika tidak diisi)
 const LEAVE_BG_URL = process.env.LEAVE_BG_URL || WELCOME_BG_URL || null;
-// background khusus kartu leave (fallback ke LEAVE_BG_URL -> WELCOME_CARD_BG_URL)
 const LEAVE_CARD_BG_URL =
   process.env.LEAVE_CARD_BG_URL ||
   LEAVE_BG_URL ||
   WELCOME_CARD_BG_URL ||
   null;
 
-// QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
-// role yang akan di-mention untuk NEW UPDATE SC + channel default
 const EVERYONE_ROLE_ID =
   process.env.EVERYONE_ROLE_ID || '1462774806079340574';
 const UPDATE_CHANNEL_ID = process.env.UPDATE_CHANNEL_ID || null;
 
-// ---------- SERVER STATS CONFIG --------------------------------
-// Kategori + 4 channel untuk panel "📊 SERVER STATS 📊"
 const SERVER_STATS_CATEGORY_ID = process.env.SERVER_STATS_CATEGORY_ID || null;
 const SERVER_STATS_ALL_ID = process.env.SERVER_STATS_ALL_ID || null;
 const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
-// Lokasi file persistent untuk reaction role
 const REACTION_ROLE_CONFIG_PATH =
   process.env.REACTION_ROLE_CONFIG_PATH ||
   path.join(__dirname, 'configrole.json');
 
-// harga default (bisa diubah pakai slash command)
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
-// ticketOwners: channelId -> userId
 const ticketOwners = new Map();
-
-// reaction role: messageId -> array { emoji, roleId, roleName? }
-// (persisten via configrole.json)
+const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
 const reactionRoles = new Map();
 let reactionRoleStore = loadReactionRoleConfig();
 
-// reconstruct Map dari store
 for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
   if (!Array.isArray(conf) || !conf.length) continue;
   const normalized = conf
@@ -168,9 +134,6 @@ console.log(
   `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
 );
 
-// ---------- HELPER UTILS ---------------------------------------
-
-// Helper untuk load/simpan config reaction role ke file JSON
 function loadReactionRoleConfig() {
   try {
     if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
@@ -209,7 +172,6 @@ function saveReactionRoleConfig(store) {
   }
 }
 
-// sekarang support banyak OWNER_ID
 function isOwner(userId) {
   return OWNER_IDS.includes(String(userId));
 }
@@ -224,7 +186,6 @@ function generatePaidKey() {
   return `EXHUBPAID-${segment}`;
 }
 
-// Format detik -> HH:MM:SS (untuk /runtime)
 function formatSecondsToHMS(sec) {
   const s = sec % 60;
   const m = Math.floor(sec / 60) % 60;
@@ -233,7 +194,6 @@ function formatSecondsToHMS(sec) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-// Pesan runtime dipakai /runtime
 function buildRuntimeMessage(client) {
   const uptimeSec = Math.floor(process.uptime());
   const startTimestampSec = Math.floor(BOT_START_TIME / 1000);
@@ -282,7 +242,6 @@ function buildRuntimeMessage(client) {
   return msg;
 }
 
-// Pecah string jadi list (support newline, ;, atau , sebagai pemisah)
 function splitList(text) {
   if (!text) return [];
   return String(text)
@@ -291,7 +250,6 @@ function splitList(text) {
     .filter(Boolean);
 }
 
-// Format sekarang ke "Today DD-MM-YYYY HH:MM WIB"
 function formatDateTimeWIB(date = new Date()) {
   const dtf = new Intl.DateTimeFormat('id-ID', {
     timeZone: 'Asia/Jakarta',
@@ -315,21 +273,19 @@ function formatDateTimeWIB(date = new Date()) {
   return `Today ${day}-${month}-${year} ${hour}:${minute} WIB`;
 }
 
-// Mapping STATUS -> label + warna embed + emoji header utama
 function mapStatusLabelAndColor(rawStatus) {
   const s = String(rawStatus || '').trim();
 
   if (!s) {
     return {
       label: '[🟢] WORKING / STABLE',
-      color: 0x57f287, // hijau
+      color: 0x57f287,
       headerEmoji: ':green_circle:',
     };
   }
 
   const upper = s.toUpperCase();
 
-  // WORKING / STABLE / ONLINE
   if (
     upper.includes('WORKING') ||
     upper.includes('STABLE') ||
@@ -342,7 +298,6 @@ function mapStatusLabelAndColor(rawStatus) {
     };
   }
 
-  // OUTDATED (BISA DIPAKE)
   if (upper.startsWith('OUTDATED')) {
     return {
       label: '[🟡] OUTDATED (BISA DIPAKE)',
@@ -351,7 +306,6 @@ function mapStatusLabelAndColor(rawStatus) {
     };
   }
 
-  // NOT WORKING / OFFLINE
   if (upper.includes('NOT WORKING') || upper === 'OFFLINE') {
     return {
       label: '❌ NOT WORKING',
@@ -360,7 +314,6 @@ function mapStatusLabelAndColor(rawStatus) {
     };
   }
 
-  // NEED UPDATE
   if (upper.includes('NEED UPDATE')) {
     return {
       label: '🛠️ NEED UPDATE',
@@ -369,7 +322,6 @@ function mapStatusLabelAndColor(rawStatus) {
     };
   }
 
-  // COMING SOON
   if (upper.includes('COMING SOON')) {
     return {
       label: '⏳ COMING SOON',
@@ -378,7 +330,6 @@ function mapStatusLabelAndColor(rawStatus) {
     };
   }
 
-  // Default: pakai apa adanya, warna netral
   return {
     label: s,
     color: 0x2b2d31,
@@ -386,16 +337,10 @@ function mapStatusLabelAndColor(rawStatus) {
   };
 }
 
-/**
- * Build payload pesan NEW UPDATE SC (format pakai blok kode + header gaya manual)
- */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
-
-  // Status mentah dari slash command / admin form
   const rawStatus = options.status || 'WORKING';
 
-  // Konversi ke label + warna standar + emoji header
   const { label: statusLabel, color, headerEmoji } =
     mapStatusLabelAndColor(rawStatus);
 
@@ -411,7 +356,6 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
     nextUpdateList = ['-'];
   }
 
-  // Helper: prefix default emoji hanya jika baris belum punya prefix sendiri
   const formatLines = (list, defaultPrefix) => {
     if (!list || !list.length) return ['-'];
     const out = [];
@@ -419,7 +363,6 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
       const line = String(raw).trim();
       if (!line) continue;
 
-      // Jika user sudah kasih prefix sendiri (emoji / [..] / bullet), jangan ditambah lagi
       if (/^([\[\:\-\•\*]|<:)/.test(line)) {
         out.push(line);
       } else {
@@ -433,13 +376,8 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   const changelogLines = formatLines(changeLogsList, '[+]');
   const nextUpdateLines = formatLines(nextUpdateList, '[⏭️]');
 
-  // ---------- FIX: resolve mention supaya tidak jadi "@@everyone" ----------
-  // Default: gunakan ping @everyone
   let mention = '@everyone';
 
-  // Jika disediakan EVERYONE_ROLE_ID dan role-nya valid serta NAMANYA tidak diawali '@',
-  // gunakan ping role (<@&ROLE_ID>). Kalau namanya diawali '@' (mis: "@everyone"),
-  // kita tetap fallback ke @everyone supaya tidak jadi "@@everyone".
   if (
     EVERYONE_ROLE_ID &&
     /^\d{5,}$/.test(EVERYONE_ROLE_ID) &&
@@ -451,35 +389,29 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
       mention = `<@&${EVERYONE_ROLE_ID}>`;
     }
   }
-  // ------------------------------------------------------------------------
 
   const descriptionParts = [];
 
-  // Header utama
   const headerStatusEmoji = headerEmoji || ':green_circle:';
   descriptionParts.push(`**【${headerStatusEmoji} 】NEW UPDATED**`);
 
-  // Block SCRIPT + STATUS
   descriptionParts.push('```');
   descriptionParts.push(`[SCRIPT]: ${scriptName}`);
   descriptionParts.push(`[STATUS]: ${statusLabel}`);
   descriptionParts.push('```');
 
-  // FEATURES
   descriptionParts.push('');
   descriptionParts.push('**【:information_source:】 FEATURES**');
   descriptionParts.push('```');
   descriptionParts.push(...featureLines);
   descriptionParts.push('```');
 
-  // CHANGE LOGS
   descriptionParts.push('');
   descriptionParts.push('**【:arrow_up_down: 】 CHANGE LOGS**');
   descriptionParts.push('```');
   descriptionParts.push(...changelogLines);
   descriptionParts.push('```');
 
-  // NEXT UPDATE
   descriptionParts.push('');
   descriptionParts.push('**【:hourglass_flowing_sand:】NEXT UPDATE**');
   descriptionParts.push('```');
@@ -511,7 +443,6 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   };
 }
 
-// Normalisasi tipe key yang tersimpan di API
 function normalizeKeyType(raw) {
   if (!raw) return '';
   const t = String(raw).trim().toLowerCase();
@@ -526,7 +457,6 @@ function normalizeKeyType(raw) {
     return 'lifetime';
   }
 
-  // kalau tipe lain / custom, kembalikan apa adanya (lowercase)
   return t;
 }
 
@@ -542,7 +472,6 @@ function getTicketOwnerId(channel) {
   return match ? match[1] : null;
 }
 
-// Tentukan pemilik key (Discord ID) untuk generate key
 function resolveKeyOwnerDiscordId(interaction, targetUser) {
   if (targetUser) {
     return String(targetUser.id);
@@ -557,7 +486,6 @@ function resolveKeyOwnerDiscordId(interaction, targetUser) {
   return String(interaction.user.id);
 }
 
-// Call API untuk cek key individual (paid key endpoint)
 async function validatePaidKey(key) {
   const base = PAIDKEY_VALIDATE_BASE.replace(/\/$/, '');
   const url = `${base}/${encodeURIComponent(key)}`;
@@ -570,9 +498,6 @@ async function validatePaidKey(key) {
   return res.json();
 }
 
-/**
- * Call API untuk create/update key di server ExHub
- */
 async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   if (!PAIDKEY_CREATE_URL) {
     console.warn(
@@ -603,7 +528,6 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
     type: normalizedType,
   };
 
-  // Bind pemilik key (Discord ID) jika ada
   if (override.ownerDiscordId) {
     info.ownerDiscordId = String(override.ownerDiscordId);
   }
@@ -629,7 +553,6 @@ async function createPaidKeyOnAPI(key, type, expiresDurationMs, override = {}) {
   }
 }
 
-// helper konversi ke ms (aman untuk number/string/null)
 function toMs(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') return value;
@@ -643,16 +566,11 @@ function toNumber(value) {
   return Number.isNaN(n) ? null : n;
 }
 
-/**
- * Call API reset HWID untuk key tertentu.
- * Body dikirim lengkap (key/token + identitas Discord).
- */
 async function resetHwidOnAPI(key, discordUser) {
   if (!RESET_HWID_API_URL) {
     throw new Error('RESET_HWID_API_URL belum dikonfigurasi di .env');
   }
 
-  // jaga-jaga: kirim key & token sekaligus
   const payload = {
     key,
     token: key,
@@ -689,10 +607,6 @@ async function resetHwidOnAPI(key, discordUser) {
   return json || { ok: true };
 }
 
-/**
- * Ambil semua key (paid + free) dan stats milik user dari /api/paidfree/user-info
- * Return: { paidKeys, freeKeys, allKeys, raw, stats }
- */
 async function fetchUserKeyInfo(discordUser) {
   if (!EXHUB_USERINFO_URL) {
     throw new Error('EXHUB_USERINFO_URL belum dikonfigurasi.');
@@ -732,7 +646,6 @@ async function fetchUserKeyInfo(discordUser) {
     const now = Date.now();
     const rawKeys = data.keys;
 
-    // Deduplicate berdasarkan token
     const byToken = new Map();
     for (const k of rawKeys) {
       if (!k || typeof k !== 'object') continue;
@@ -790,7 +703,7 @@ async function fetchUserKeyInfo(discordUser) {
 
       const ownerDiscordId =
         k.ownerDiscordId ||
-        (k.info && k.info.ownerDiscordId) ||
+        (k.info && (k.info.ownerDiscordId)) ||
         null;
 
       const createdAtMs =
@@ -840,7 +753,6 @@ async function fetchUserKeyInfo(discordUser) {
       else paidKeys.push(norm);
     }
 
-    // ----- Stats -----
     const stats = {};
     const s = data.stats || data.execStats || data.usage || {};
 
@@ -942,13 +854,11 @@ async function fetchUserKeyInfo(discordUser) {
   }
 }
 
-// wrapper lama untuk /mykey (paid only)
 async function fetchUserPaidKeys(discordUser) {
   const info = await fetchUserKeyInfo(discordUser);
   return info.paidKeys;
 }
 
-// lookup username Roblox -> { id, name, displayName }
 async function lookupRobloxUser(username) {
   const res = await fetch('https://users.roblox.com/v1/usernames/users', {
     method: 'POST',
@@ -991,14 +901,17 @@ async function logOrder(guild, embed) {
   }
 }
 
+async function logPaidOrder(guild, options) {
+  if (!LOGPAID_CHANNEL_ID) return;
+  try {
+    const ch = guild.channels.cache.get(LOGPAID_CHANNEL_ID);
+    if (!ch) return;
+    await ch.send(options);
+  } catch (err) {
+    console.error('Failed to send paid order log:', err);
+  }
+}
 
-// ---------- WELCOME / LEAVE CARD HELPER (Canvas) -----------------------
-
-/**
- * Generate Buffer PNG kartu welcome (avatar + background + teks)
- * @param {import('discord.js').GuildMember} member
- * @returns {Promise<Buffer>}
- */
 async function generateWelcomeCard(member) {
   const width = 1262;
   const height = 576;
@@ -1006,7 +919,6 @@ async function generateWelcomeCard(member) {
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
 
-  // Background
   if (WELCOME_CARD_BG_URL) {
     try {
       const bg = await loadImage(WELCOME_CARD_BG_URL);
@@ -1021,7 +933,6 @@ async function generateWelcomeCard(member) {
     ctx.fillRect(0, 0, width, height);
   }
 
-  // Avatar lingkaran
   const avatarUrl = member.user.displayAvatarURL({
     extension: 'png',
     size: 512,
@@ -1055,14 +966,12 @@ async function generateWelcomeCard(member) {
     ctx.restore();
   }
 
-  // Border avatar
   ctx.beginPath();
   ctx.arc(avatarX, avatarY, avatarRadius + 8, 0, Math.PI * 2, true);
   ctx.lineWidth = 12;
   ctx.strokeStyle = '#2196f3';
   ctx.stroke();
 
-  // Teks "WELCOME"
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
@@ -1076,7 +985,6 @@ async function generateWelcomeCard(member) {
   const welcomeTextY = avatarY + avatarRadius + 80;
   ctx.fillText('WELCOME', width / 2, welcomeTextY);
 
-  // Username
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 10;
 
@@ -1099,7 +1007,6 @@ async function generateWelcomeCard(member) {
   const usernameY = welcomeTextY + 70;
   ctx.fillText(username, width / 2, usernameY);
 
-  // reset shadow
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
@@ -1109,11 +1016,6 @@ async function generateWelcomeCard(member) {
   return buffer;
 }
 
-/**
- * Generate Buffer PNG kartu leave (avatar + background + teks GOODBYE)
- * @param {import('discord.js').GuildMember} member
- * @returns {Promise<Buffer>}
- */
 async function generateLeaveCard(member) {
   const width = 1262;
   const height = 576;
@@ -1121,7 +1023,6 @@ async function generateLeaveCard(member) {
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
 
-  // Background
   if (LEAVE_CARD_BG_URL) {
     try {
       const bg = await loadImage(LEAVE_CARD_BG_URL);
@@ -1136,7 +1037,6 @@ async function generateLeaveCard(member) {
     ctx.fillRect(0, 0, width, height);
   }
 
-  // Avatar lingkaran
   const avatarUrl = member.user.displayAvatarURL({
     extension: 'png',
     size: 512,
@@ -1170,14 +1070,12 @@ async function generateLeaveCard(member) {
     ctx.restore();
   }
 
-  // Border avatar
   ctx.beginPath();
   ctx.arc(avatarX, avatarY, avatarRadius + 8, 0, Math.PI * 2, true);
   ctx.lineWidth = 12;
   ctx.strokeStyle = '#ed4245';
   ctx.stroke();
 
-  // Teks "GOODBYE"
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
@@ -1191,7 +1089,6 @@ async function generateLeaveCard(member) {
   const goodbyeTextY = avatarY + avatarRadius + 80;
   ctx.fillText('GOODBYE', width / 2, goodbyeTextY);
 
-  // Username
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 10;
 
@@ -1214,7 +1111,6 @@ async function generateLeaveCard(member) {
   const usernameY = goodbyeTextY + 70;
   ctx.fillText(username, width / 2, usernameY);
 
-  // reset shadow
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
@@ -1223,8 +1119,6 @@ async function generateLeaveCard(member) {
   const buffer = await canvas.encode('png');
   return buffer;
 }
-
-// ---------- SERVER STATS HELPER --------------------------------
 
 async function updateServerStats(guild) {
   try {
@@ -1313,7 +1207,146 @@ async function updateServerStats(guild) {
   }
 }
 
-// ---------- DISCORD CLIENT -------------------------------------
+/**
+ * Helper universal untuk proses redeem paid key:
+ * mode: "month" | "lifetime" | "any"
+ */
+async function redeemPaidKeyFlow(interaction, key, mode) {
+  try {
+    const data = await validatePaidKey(key);
+    const info = data.info || null;
+
+    if (!info) {
+      await interaction.editReply({
+        content: '❌ Key tidak ditemukan di database.',
+      });
+      return;
+    }
+
+    if (data.deleted) {
+      await interaction.editReply({
+        content: '❌ Key ini sudah diblokir / dihapus.',
+      });
+      return;
+    }
+
+    if (data.expired) {
+      await interaction.editReply({
+        content: '❌ Key ini sudah kadaluarsa.',
+      });
+      return;
+    }
+
+    if (data.valid) {
+      await interaction.editReply({
+        content:
+          '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
+      });
+      return;
+    }
+
+    const keyType = normalizeKeyType(info.type || '');
+    if (!keyType) {
+      await interaction.editReply({
+        content:
+          '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
+      });
+      return;
+    }
+
+    if (mode === 'month' && keyType !== 'month') {
+      await interaction.editReply({
+        content:
+          '❌ Key ini **bukan** tipe **Key Sebulan**.\n' +
+          'Jika ini key lifetime, gunakan perintah `/redeemkeylifetime`.\n' +
+          'Jika merasa ada kesalahan, silakan hubungi admin.',
+      });
+      return;
+    }
+
+    if (mode === 'lifetime' && keyType !== 'lifetime') {
+      await interaction.editReply({
+        content:
+          '❌ Key ini **bukan** tipe **Key Lifetime**.\n' +
+          'Jika ini key sebulan, gunakan perintah `/redeemkeysebulan`.\n' +
+          'Jika merasa ada kesalahan, silakan hubungi admin.',
+      });
+      return;
+    }
+
+    if (
+      mode === 'any' &&
+      keyType !== 'month' &&
+      keyType !== 'lifetime'
+    ) {
+      await interaction.editReply({
+        content:
+          `⚠️ Key ini bertipe "${info.type}" yang belum didukung redeem otomatis dari panel.\n` +
+          'Silakan hubungi admin untuk bantuan lebih lanjut.',
+      });
+      return;
+    }
+
+    if (
+      info.ownerDiscordId &&
+      String(info.ownerDiscordId) !== interaction.user.id
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ Key ini terikat ke akun Discord lain.\n' +
+          'Gunakan akun Discord yang sama dengan yang melakukan order.',
+      });
+      return;
+    }
+
+    const ownerDiscordId = info.ownerDiscordId
+      ? String(info.ownerDiscordId)
+      : interaction.user.id;
+
+    const byIpSource =
+      mode === 'month'
+        ? 'discord-bot-redeem-month'
+        : mode === 'lifetime'
+        ? 'discord-bot-redeem-lifetime'
+        : 'discord-bot-redeem-any';
+
+    try {
+      await createPaidKeyOnAPI(key, keyType, null, {
+        valid: true,
+        deleted: false,
+        createdAt: info.createdAt,
+        expiresAfter: info.expiresAfter,
+        byIp: byIpSource,
+        ownerDiscordId,
+      });
+    } catch (err) {
+      console.error(`createPaidKeyOnAPI (redeem ${mode}) error:`, err);
+      await interaction.editReply({
+        content:
+          'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
+      });
+      return;
+    }
+
+    let labelType;
+    if (keyType === 'month') labelType = 'Key Sebulan';
+    else if (keyType === 'lifetime') labelType = 'Key Lifetime';
+    else labelType = `Key tipe "${info.type || 'unknown'}"`;
+
+    await interaction.editReply({
+      content:
+        `✅ ${labelType} berhasil digunakan!\n` +
+        `Key: \`${key}\`\n` +
+        'Terima kasih sudah menggunakan ExHub.',
+    });
+  } catch (err) {
+    console.error(`validatePaidKey (${mode}) error:`, err);
+    await interaction.editReply({
+      content:
+        'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
+    });
+  }
+}
 
 const client = new Client({
   intents: [
@@ -1339,7 +1372,6 @@ client.once(Events.ClientReady, async (c) => {
   }
 });
 
-// Welcome message + refresh stats (dengan kartu Canvas)
 client.on('guildMemberAdd', async (member) => {
   try {
     const channelId = welcomeChannelId;
@@ -1384,7 +1416,6 @@ client.on('guildMemberAdd', async (member) => {
   }
 });
 
-// Leave message + refresh stats (dengan kartu Canvas)
 client.on('guildMemberRemove', async (member) => {
   try {
     const channelId = leaveChannelId;
@@ -1433,7 +1464,6 @@ client.on('guildUpdate', async (oldGuild, newGuild) => {
   }
 });
 
-// Reaction role (multi)
 client.on('messageReactionAdd', async (reaction, user) => {
   try {
     if (user.bot) return;
@@ -1494,7 +1524,6 @@ client.on('messageReactionRemove', async (reaction, user) => {
   }
 });
 
-// Cleanup config kalau pesan reaction role dihapus
 client.on('messageDelete', (message) => {
   try {
     if (!message || !message.id) return;
@@ -1536,18 +1565,16 @@ client.on('messageDeleteBulk', (messages) => {
   }
 });
 
-// ---------- PANEL & TICKET HELPERS -----------------------------
-
 async function sendStorePanel(channel) {
   const embed = new EmbedBuilder()
-    .setTitle('🎮 EXHUB STORE - Premium Scripts')
+    .setTitle('🎮 ExHub Paid Scripts 🎮 ')
     .setDescription(
-      'Halo! Selamat datang di **EXHUB STORE** 👋\n\n' +
+      'Halo! Selamat datang di **EXHUB [BETA]** 👋\n\n' +
         'Kamu lagi cari script Roblox premium? Kamu datang ke tempat yang tepat!\n\n' +
-        '✨ Script oke\n' +
-        '💰 Harga bersahabat di kantong\n' +
+        '✨ Script berkualitas\n' +
+        '💰 Harga sangat terjangkau\n' +
         '⚡ Respon cepat dari admin\n\n' +
-        'Klik tombol **📩 Buat Ticket** di bawah untuk mulai order ya!\n' +
+        'Klik tombol **📩 Buat Ticket** di bawah untuk mulai order yaahh :D\n' +
         'Kami siap bantu kamu 24/7 🙂'
     )
     .setColor(0x2b2d31);
@@ -1563,7 +1590,6 @@ async function sendStorePanel(channel) {
   await channel.send({ embeds: [embed], components: [row] });
 }
 
-// Panel kontrol ala Sixsense (Redeem Key, Get Script, dll.)
 async function sendControlPanel(channel, guild) {
   const embed = new EmbedBuilder()
     .setTitle('ExHub Control Panel')
@@ -1645,7 +1671,7 @@ async function sendTicketIntroMessage(channel, user) {
     )} (1 Username • Permanent)`,
     '',
     '**Langkah Selanjutnya**',
-    '1. Pilih paket dari dropdown menu di bawah.',
+    '1. Pilih paket dari dropdown list menu di bawah.',
     '2. Ikuti instruksi yang muncul.',
     '3. Upload bukti bayar (screenshot QRIS) di channel ini.',
     '4. Tunggu konfirmasi admin ✅',
@@ -1660,7 +1686,7 @@ async function sendTicketIntroMessage(channel, user) {
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('ticket_select_package')
-    .setPlaceholder('📦 Pilih paket yang Anda inginkan...')
+    .setPlaceholder('📦 Silahkan pilih orderan Anda')
     .addOptions(
       {
         label: 'Key Sebulan',
@@ -1696,13 +1722,23 @@ async function sendTicketIntroMessage(channel, user) {
     .setEmoji('❌')
     .setStyle(ButtonStyle.Secondary);
 
+  const btnConfirm = new ButtonBuilder()
+    .setCustomId('ticket_confirm')
+    .setLabel('Confirm Order')
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Success);
+
   const btnClose = new ButtonBuilder()
     .setCustomId('ticket_close')
     .setLabel('Close Ticket')
     .setEmoji('🔒')
     .setStyle(ButtonStyle.Danger);
 
-  const rowButtons = new ActionRowBuilder().addComponents(btnCancel, btnClose);
+  const rowButtons = new ActionRowBuilder().addComponents(
+    btnCancel,
+    btnConfirm,
+    btnClose
+  );
 
   await channel.send({
     content: `<@${user.id}>`,
@@ -1711,11 +1747,8 @@ async function sendTicketIntroMessage(channel, user) {
   });
 }
 
-// ---------- INTERACTION HANDLER --------------------------------
-
 client.on('interactionCreate', async (interaction) => {
   try {
-    // ===================== SLASH COMMAND =======================
     if (interaction.isChatInputCommand()) {
       const { commandName } = interaction;
 
@@ -1730,7 +1763,6 @@ client.on('interactionCreate', async (interaction) => {
         return true;
       };
 
-      // /sendticketpanel
       if (commandName === 'sendticketpanel') {
         if (!(await ensureOwner())) return;
         await sendStorePanel(interaction.channel);
@@ -1738,20 +1770,14 @@ client.on('interactionCreate', async (interaction) => {
           content: 'Panel ticket store sudah dikirim di channel ini.',
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /sendcontrolpanel
-      else if (commandName === 'sendcontrolpanel') {
+      } else if (commandName === 'sendcontrolpanel') {
         if (!(await ensureOwner())) return;
         await sendControlPanel(interaction.channel, interaction.guild);
         await interaction.reply({
           content: 'Control panel utama sudah dikirim di channel ini.',
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /setharga_sebulan
-      else if (commandName === 'setharga_sebulan') {
+      } else if (commandName === 'setharga_sebulan') {
         if (!(await ensureOwner())) return;
         const harga = interaction.options.getInteger('harga', true);
         priceKeyMonth = harga;
@@ -1759,10 +1785,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /setharga_lifetime
-      else if (commandName === 'setharga_lifetime') {
+      } else if (commandName === 'setharga_lifetime') {
         if (!(await ensureOwner())) return;
         const harga = interaction.options.getInteger('harga', true);
         priceKeyLifetime = harga;
@@ -1772,10 +1795,7 @@ client.on('interactionCreate', async (interaction) => {
           )}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /setharga_indohangout
-      else if (commandName === 'setharga_indohangout') {
+      } else if (commandName === 'setharga_indohangout') {
         if (!(await ensureOwner())) return;
         const harga = interaction.options.getInteger('harga', true);
         priceIndoHangout = harga;
@@ -1785,10 +1805,7 @@ client.on('interactionCreate', async (interaction) => {
           )}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /generatekeysebulan
-      else if (commandName === 'generatekeysebulan') {
+      } else if (commandName === 'generatekeysebulan') {
         if (!(await ensureOwner())) return;
         const target = interaction.options.getUser('member', false);
         const key = generatePaidKey();
@@ -1842,10 +1859,7 @@ client.on('interactionCreate', async (interaction) => {
             flags: MessageFlags.Ephemeral,
           });
         }
-      }
-
-      // /generatekeylifetime
-      else if (commandName === 'generatekeylifetime') {
+      } else if (commandName === 'generatekeylifetime') {
         if (!(await ensureOwner())) return;
         const target = interaction.options.getUser('member', false);
         const key = generatePaidKey();
@@ -1899,10 +1913,7 @@ client.on('interactionCreate', async (interaction) => {
             flags: MessageFlags.Ephemeral,
           });
         }
-      }
-
-      // /redeemkeysebulan
-      else if (commandName === 'redeemkeysebulan') {
+      } else if (commandName === 'redeemkeysebulan') {
         const modal = new ModalBuilder()
           .setCustomId('modal_redeem_key_month')
           .setTitle('Redeem Key Sebulan');
@@ -1917,10 +1928,7 @@ client.on('interactionCreate', async (interaction) => {
         const row = new ActionRowBuilder().addComponents(input);
         modal.addComponents(row);
         await interaction.showModal(modal);
-      }
-
-      // /redeemkeylifetime
-      else if (commandName === 'redeemkeylifetime') {
+      } else if (commandName === 'redeemkeylifetime') {
         const modal = new ModalBuilder()
           .setCustomId('modal_redeem_key_life')
           .setTitle('Redeem Key Lifetime');
@@ -1935,10 +1943,7 @@ client.on('interactionCreate', async (interaction) => {
         const row = new ActionRowBuilder().addComponents(input);
         modal.addComponents(row);
         await interaction.showModal(modal);
-      }
-
-      // /setwelcomechannel
-      else if (commandName === 'setwelcomechannel') {
+      } else if (commandName === 'setwelcomechannel') {
         if (!(await ensureOwner())) return;
         const ch = interaction.options.getChannel('channel', true);
         welcomeChannelId = ch.id;
@@ -1946,10 +1951,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Welcome channel di-set ke ${ch}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /setleavechannel
-      else if (commandName === 'setleavechannel') {
+      } else if (commandName === 'setleavechannel') {
         if (!(await ensureOwner())) return;
         const ch = interaction.options.getChannel('channel', true);
         leaveChannelId = ch.id;
@@ -1957,10 +1959,43 @@ client.on('interactionCreate', async (interaction) => {
           content: `Leave channel di-set ke ${ch}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
+      } else if (commandName === 'changenamechannel') {
+        if (!(await ensureOwner())) return;
+        const targetChannel = interaction.options.getChannel('channel', true);
+        const newName = interaction.options.getString('name', true).trim();
 
-      // /refreshserverstats
-      else if (commandName === 'refreshserverstats') {
+        if (!newName) {
+          await interaction.reply({
+            content: 'Nama channel baru tidak boleh kosong.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        if (!targetChannel || typeof targetChannel.setName !== 'function') {
+          await interaction.reply({
+            content:
+              'Channel yang dipilih tidak bisa diubah namanya. Pastikan itu channel biasa (text / voice / announcement).',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        try {
+          await targetChannel.setName(newName);
+          await interaction.reply({
+            content: `✅ Nama channel ${targetChannel} berhasil diubah menjadi \`${newName}\`.`,
+            flags: MessageFlags.Ephemeral,
+          });
+        } catch (err) {
+          console.error('/changenamechannel error:', err);
+          await interaction.reply({
+            content:
+              'Gagal mengubah nama channel. Pastikan bot punya izin **Manage Channels**.',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+      } else if (commandName === 'refreshserverstats') {
         if (!(await ensureOwner())) return;
         if (!interaction.guild) {
           await interaction.reply({
@@ -1976,21 +2011,16 @@ client.on('interactionCreate', async (interaction) => {
           content:
             'SERVER STATS berhasil di-refresh. Jika nama channel belum berubah, cek kembali ID channel di `.env`.',
         });
-      }
-
-      // /sendreactionrole
-      else if (commandName === 'sendreactionrole') {
+      } else if (commandName === 'sendreactionrole') {
         if (!(await ensureOwner())) return;
 
         const rawConfigText = interaction.options.getString('config', true);
         const channelsText = interaction.options.getString('channels', false);
 
-        // default content
         let contentText =
           interaction.options.getString('content', false) ||
           'React dengan emoji berikut untuk mendapatkan role:';
 
-        // Support inline content pakai "#"
         let configText = rawConfigText;
         const hashIdx = rawConfigText.indexOf('#');
         if (hashIdx !== -1) {
@@ -2166,7 +2196,6 @@ client.on('interactionCreate', async (interaction) => {
             }
           }
 
-          // === PERSISTEN: simpan ke Map & file JSON ===
           const msgConfig = parsed.map((p) => ({
             emoji: p.emoji,
             roleId: p.roleId,
@@ -2193,10 +2222,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         await interaction.editReply({ content: replyText });
-      }
-
-      // /sendupdatesc
-      else if (commandName === 'sendupdatesc') {
+      } else if (commandName === 'sendupdatesc') {
         if (!(await ensureOwner())) return;
 
         if (!interaction.guild) {
@@ -2219,16 +2245,13 @@ client.on('interactionCreate', async (interaction) => {
 
         let targetChannel = null;
 
-        // 1) jika user pilih channel
         if (
           targetChannelOpt &&
           (targetChannelOpt.type === ChannelType.GuildText ||
             targetChannelOpt.type === ChannelType.GuildAnnouncement)
         ) {
           targetChannel = targetChannelOpt;
-        }
-        // 2) kalau ada UPDATE_CHANNEL_ID di env
-        else if (UPDATE_CHANNEL_ID) {
+        } else if (UPDATE_CHANNEL_ID) {
           const ch = interaction.guild.channels.cache.get(UPDATE_CHANNEL_ID);
           if (
             ch &&
@@ -2238,7 +2261,7 @@ client.on('interactionCreate', async (interaction) => {
             targetChannel = ch;
           }
         }
-        // 3) fallback: channel sekarang
+
         if (!targetChannel) {
           targetChannel = interaction.channel;
         }
@@ -2270,19 +2293,13 @@ client.on('interactionCreate', async (interaction) => {
           content: `Pengumuman NEW UPDATE SC sudah dikirim ke ${targetChannel}.`,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /runtime
-      else if (commandName === 'runtime') {
+      } else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
         await interaction.reply({
           content: msg,
           flags: MessageFlags.Ephemeral,
         });
-      }
-
-      // /mykey dan /checkmykey (paid only)
-      else if (commandName === 'mykey' || commandName === 'checkmykey') {
+      } else if (commandName === 'mykey' || commandName === 'checkmykey') {
         await interaction.deferReply({ ephemeral: true });
 
         try {
@@ -2368,13 +2385,9 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===================== BUTTONS ==============================
     if (interaction.isButton()) {
       const { customId } = interaction;
 
-      // ----- BUTTONS: CONTROL PANEL -----
-
-      // Redeem Key -> modal input (auto detect month / lifetime)
       if (customId === 'control_redeem_key') {
         const modal = new ModalBuilder()
           .setCustomId('modal_redeem_key_any')
@@ -2393,7 +2406,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Get Script -> kirim Desktop + Mobile (Tap to Copy)
       if (customId === 'control_get_script') {
         const scriptLine =
           'loadstring(game:HttpGet("https://exc-webs.vercel.app/api/script/spear-fishing", true))()';
@@ -2415,7 +2427,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Check Key -> langsung panggil API dan kirim list paid+free
       if (customId === 'control_check_key') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -2479,45 +2490,30 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           if (freeKeys.length) {
-            for (let i = 0; i < maxFree; i++) {
-              const k = freeKeys[i];
-              const createdTs = k.createdAtMs
-                ? Math.floor(k.createdAtMs / 1000)
-                : null;
-              const expireTs = k.expiresAfterMs
-                ? Math.floor(k.expiresAfterMs / 1000)
-                : null;
-
-              let providerLabel = k.provider || 'unknown';
+            const freeByProvider = {};
+            for (const k of freeKeys) {
+              let prov = k.provider || 'unknown';
               if (
-                providerLabel.includes('work.ink') ||
-                providerLabel === 'work.ink' ||
-                providerLabel === 'workink'
+                prov.includes('work.ink') ||
+                prov === 'work.ink' ||
+                prov === 'workink'
               ) {
-                providerLabel = 'Work.ink';
-              } else if (providerLabel.includes('linkvertise')) {
-                providerLabel = 'Linkvertise';
+                prov = 'Work.ink';
+              } else if (prov.includes('linkvertise')) {
+                prov = 'Linkvertise';
               }
-
-              const lines = [];
-              lines.push(`**Key:** \`${k.token}\``);
-              lines.push(`**Provider:** ${providerLabel}`);
-              if (createdTs) {
-                lines.push(`**Claimed:** <t:${createdTs}:f>`);
-              }
-              if (expireTs) {
-                lines.push(
-                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
-                );
-              }
-              lines.push(`**Status:** ${k.status}`);
-
-              embed.addFields({
-                name: `Free Key #${i + 1}`,
-                value: lines.join('\n'),
-                inline: false,
-              });
+              freeByProvider[prov] = (freeByProvider[prov] || 0) + 1;
             }
+
+            const list = Object.entries(freeByProvider)
+              .map(([prov, count]) => `${prov}: **${count}**`)
+              .join('\n');
+
+            embed.addFields({
+              name: 'Free Keys',
+              value: list || '0',
+              inline: false,
+            });
           }
 
           if (paidKeys.length > maxPaid || freeKeys.length > maxFree) {
@@ -2537,7 +2533,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Reset HWID -> buka modal untuk input key lalu call API
       if (customId === 'control_reset_hwid') {
         if (!RESET_HWID_API_URL) {
           await interaction.reply({
@@ -2566,7 +2561,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Claim Role -> cek paid key aktif dulu
       if (customId === 'control_claim_role') {
         if (!interaction.guild) {
           await interaction.reply({
@@ -2639,7 +2633,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Get Stats -> ringkasan Total Keys, Paid/Free, Execute, Executor, dll
       if (customId === 'control_get_stats') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -2753,9 +2746,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // ----- BUTTONS: TICKET / ROBLOX FLOW -----
-
-      // create ticket
       if (customId === 'store_create_ticket') {
         if (!interaction.guild) {
           await interaction.reply({
@@ -2850,7 +2840,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // cancel order
       if (customId === 'ticket_cancel') {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -2877,7 +2866,106 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // close ticket
+      if (customId === 'ticket_confirm') {
+        if (!interaction.guild) {
+          await interaction.reply({
+            content: 'Perintah ini hanya dapat digunakan di dalam server.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const member = await interaction.guild.members.fetch(
+          interaction.user.id
+        );
+        if (
+          !member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya admin / owner yang dapat mengkonfirmasi order ini.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guild = interaction.guild;
+        const ownerId = getTicketOwnerId(interaction.channel);
+        const order = ticketOrders.get(interaction.channel.id);
+
+        let paidLabel = 'Unknown';
+        let nominal = 0;
+        let expiresMs = null;
+
+        if (order && order.type === 'KEY_MONTH') {
+          paidLabel = 'Key Sebulan';
+          nominal = priceKeyMonth;
+          const createdAt = order.timestamp || Date.now();
+          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
+        } else if (order && order.type === 'KEY_LIFE') {
+          paidLabel = 'Key Lifetime';
+          nominal = priceKeyLifetime;
+          const createdAt = order.timestamp || Date.now();
+          expiresMs = createdAt + 365 * 24 * 60 * 60 * 1000;
+        } else if (order && order.type === 'INDO_VIP') {
+          paidLabel = 'Indo Hangout Premium';
+          nominal = priceIndoHangout;
+        }
+
+        let expiredText = '-';
+        if (expiresMs) {
+          const expTs = Math.floor(expiresMs / 1000);
+          expiredText = `<t:${expTs}:F>`;
+        } else if (paidLabel === 'Indo Hangout Premium') {
+          expiredText = 'Permanent';
+        }
+
+        const ownerMention = ownerId
+          ? `<@${ownerId}>`
+          : `${interaction.user}`;
+
+        const nominalText =
+          nominal && nominal > 0
+            ? `Rp. ${formatRupiah(nominal)}`
+            : 'Rp. -';
+
+        const content =
+          '**✅️ Sukses Order Key 🔑**\n' +
+          `User: ${ownerMention}\n` +
+          `Paid Key: ${paidLabel}\n` +
+          `Expired: ${expiredText}\n` +
+          `Nominal: ${nominalText}`;
+
+        if (!LOGPAID_CHANNEL_ID) {
+          await interaction.reply({
+            content:
+              'LOGPAID_CHANNEL_ID belum dikonfigurasi di .env, tidak bisa mengirim log paid order.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const logChannel = guild.channels.cache.get(LOGPAID_CHANNEL_ID);
+        if (!logChannel) {
+          await interaction.reply({
+            content:
+              'Channel LOGPAID_CHANNEL_ID tidak ditemukan di server. Cek kembali konfigurasi .env.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        await logPaidOrder(guild, { content });
+
+        await interaction.reply({
+          content: '✅ Order berhasil dikonfirmasi dan log telah dikirim.',
+          flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+      }
+
       if (customId === 'ticket_close') {
         const member = await interaction.guild.members.fetch(
           interaction.user.id
@@ -2907,7 +2995,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // tombol "Input Username Lagi"
       if (customId === 'roblox_reinput' || customId === 'roblox_wrong') {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -2939,7 +3026,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // tombol "Ya, Benar!" (konfirmasi username)
       if (customId.startsWith('roblox_confirm_')) {
         const ownerId = getTicketOwnerId(interaction.channel);
         if (
@@ -3029,7 +3115,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===================== SELECT MENU ==========================
     if (interaction.isStringSelectMenu()) {
       const { customId } = interaction;
       if (customId === 'ticket_select_package') {
@@ -3050,6 +3135,12 @@ client.on('interactionCreate', async (interaction) => {
 
         if (value === 'KEY_MONTH') {
           const harga = priceKeyMonth;
+          ticketOrders.set(interaction.channel.id, {
+            type: 'KEY_MONTH',
+            price: harga,
+            timestamp: Date.now(),
+          });
+
           const instruksi = new EmbedBuilder()
             .setTitle('✨ Instruksi Pembayaran — Key Sebulan')
             .setDescription('Scan QRIS di bawah untuk membayar')
@@ -3085,6 +3176,12 @@ client.on('interactionCreate', async (interaction) => {
           });
         } else if (value === 'KEY_LIFE') {
           const harga = priceKeyLifetime;
+          ticketOrders.set(interaction.channel.id, {
+            type: 'KEY_LIFE',
+            price: harga,
+            timestamp: Date.now(),
+          });
+
           const instruksi = new EmbedBuilder()
             .setTitle('✨ Instruksi Pembayaran — Key Lifetime')
             .setDescription('Scan QRIS di bawah untuk membayar')
@@ -3119,6 +3216,12 @@ client.on('interactionCreate', async (interaction) => {
             embeds: [instruksi],
           });
         } else if (value === 'INDO_VIP') {
+          ticketOrders.set(interaction.channel.id, {
+            type: 'INDO_VIP',
+            price: priceIndoHangout,
+            timestamp: Date.now(),
+          });
+
           const modal = new ModalBuilder()
             .setCustomId('modal_roblox_username')
             .setTitle('Masukkan Username Roblox');
@@ -3141,11 +3244,9 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===================== MODAL SUBMIT =========================
     if (interaction.isModalSubmit()) {
       const { customId } = interaction;
 
-      // modal input username Roblox
       if (customId === 'modal_roblox_username') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3272,7 +3373,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // modal redeem key sebulan
       if (customId === 'modal_redeem_key_month') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3286,113 +3386,10 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        try {
-          const data = await validatePaidKey(key);
-          const info = data.info || null;
-
-          if (!info) {
-            await interaction.editReply({
-              content: '❌ Key tidak ditemukan di database.',
-            });
-            return;
-          }
-
-          if (data.deleted) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah diblokir / dihapus.',
-            });
-            return;
-          }
-
-          if (data.expired) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah kadaluarsa.',
-            });
-            return;
-          }
-
-          if (data.valid) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
-            });
-            return;
-          }
-
-          const keyType = normalizeKeyType(info.type || '');
-          if (!keyType) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
-            });
-            return;
-          }
-
-          if (keyType !== 'month') {
-            await interaction.editReply({
-              content:
-                '❌ Key ini **bukan** tipe **Key Sebulan**.\n' +
-                'Jika ini key lifetime, gunakan perintah `/redeemkeylifetime`.\n' +
-                'Jika merasa ada kesalahan, silakan hubungi admin.',
-            });
-            return;
-          }
-
-          if (
-            info.ownerDiscordId &&
-            String(info.ownerDiscordId) !== interaction.user.id
-          ) {
-            await interaction.editReply({
-              content:
-                '❌ Key ini terikat ke akun Discord lain.\n' +
-                'Gunakan akun Discord yang sama dengan yang melakukan order.',
-            });
-            return;
-          }
-
-          const ownerDiscordId = info.ownerDiscordId
-            ? String(info.ownerDiscordId)
-            : interaction.user.id;
-
-          try {
-            await createPaidKeyOnAPI(key, keyType, null, {
-              valid: true,
-              deleted: false,
-              createdAt: info.createdAt,
-              expiresAfter: info.expiresAfter,
-              byIp: 'discord-bot-redeem-month',
-              ownerDiscordId,
-            });
-          } catch (err) {
-            console.error(
-              'createPaidKeyOnAPI (redeem month) error:',
-              err
-            );
-            await interaction.editReply({
-              content:
-                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
-            });
-            return;
-          }
-
-          await interaction.editReply({
-            content:
-              `✅ Key sebulan berhasil digunakan!\n` +
-              `Key: \`${key}\`\n` +
-              'Terima kasih sudah menggunakan ExHub.',
-          });
-        } catch (err) {
-          console.error('validatePaidKey (month) error:', err);
-          await interaction.editReply({
-            content:
-              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
-          });
-        }
-
+        await redeemPaidKeyFlow(interaction, key, 'month');
         return;
       }
 
-      // modal redeem key lifetime
       if (customId === 'modal_redeem_key_life') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3406,113 +3403,10 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        try {
-          const data = await validatePaidKey(key);
-          const info = data.info || null;
-
-          if (!info) {
-            await interaction.editReply({
-              content: '❌ Key tidak ditemukan di database.',
-            });
-            return;
-          }
-
-          if (data.deleted) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah diblokir / dihapus.',
-            });
-            return;
-          }
-
-          if (data.expired) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah kadaluarsa.',
-            });
-            return;
-          }
-
-          if (data.valid) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
-            });
-            return;
-          }
-
-          const keyType = normalizeKeyType(info.type || '');
-          if (!keyType) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
-            });
-            return;
-          }
-
-          if (keyType !== 'lifetime') {
-            await interaction.editReply({
-              content:
-                '❌ Key ini **bukan** tipe **Key Lifetime**.\n' +
-                'Jika ini key sebulan, gunakan perintah `/redeemkeysebulan`.\n' +
-                'Jika merasa ada kesalahan, silakan hubungi admin.',
-            });
-            return;
-          }
-
-          if (
-            info.ownerDiscordId &&
-            String(info.ownerDiscordId) !== interaction.user.id
-          ) {
-            await interaction.editReply({
-              content:
-                '❌ Key ini terikat ke akun Discord lain.\n' +
-                'Gunakan akun Discord yang sama dengan yang melakukan order.',
-            });
-            return;
-          }
-
-          const ownerDiscordId = info.ownerDiscordId
-            ? String(info.ownerDiscordId)
-            : interaction.user.id;
-
-          try {
-            await createPaidKeyOnAPI(key, keyType, null, {
-              valid: true,
-              deleted: false,
-              createdAt: info.createdAt,
-              expiresAfter: info.expiresAfter,
-              byIp: 'discord-bot-redeem-lifetime',
-              ownerDiscordId,
-            });
-          } catch (err) {
-            console.error(
-              'createPaidKeyOnAPI (redeem lifetime) error:',
-              err
-            );
-            await interaction.editReply({
-              content:
-                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
-            });
-            return;
-          }
-
-          await interaction.editReply({
-            content:
-              `✅ Key lifetime berhasil di redeem, silahkan digunakan!\n` +
-              `Key: \`${key}\`\n` +
-              'Terima kasih sudah menggunakan ExHub.',
-          });
-        } catch (err) {
-          console.error('validatePaidKey (life) error:', err);
-          await interaction.editReply({
-            content:
-              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
-          });
-        }
-
+        await redeemPaidKeyFlow(interaction, key, 'lifetime');
         return;
       }
 
-      // modal redeem key via tombol panel (auto detect type)
       if (customId === 'modal_redeem_key_any') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3526,117 +3420,10 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        try {
-          const data = await validatePaidKey(key);
-          const info = data.info || null;
-
-          if (!info) {
-            await interaction.editReply({
-              content: '❌ Key tidak ditemukan di database.',
-            });
-            return;
-          }
-
-          if (data.deleted) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah diblokir / dihapus.',
-            });
-            return;
-          }
-
-          if (data.expired) {
-            await interaction.editReply({
-              content: '❌ Key ini sudah kadaluarsa.',
-            });
-            return;
-          }
-
-          if (data.valid) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini sudah pernah diredeem sebelumnya (sudah aktif).',
-            });
-            return;
-          }
-
-          const keyType = normalizeKeyType(info.type || '');
-          if (!keyType) {
-            await interaction.editReply({
-              content:
-                '⚠️ Key ini tidak memiliki tipe paket yang jelas di database. Hubungi admin untuk pengecekan manual.',
-            });
-            return;
-          }
-
-          if (keyType !== 'month' && keyType !== 'lifetime') {
-            await interaction.editReply({
-              content:
-                `⚠️ Key ini bertipe "${info.type}" yang belum didukung redeem otomatis dari panel.\n` +
-                'Silakan hubungi admin untuk bantuan lebih lanjut.',
-            });
-            return;
-          }
-
-          if (
-            info.ownerDiscordId &&
-            String(info.ownerDiscordId) !== interaction.user.id
-          ) {
-            await interaction.editReply({
-              content:
-                '❌ Key ini terikat ke akun Discord lain.\n' +
-                'Gunakan akun Discord yang sama dengan yang melakukan order.',
-            });
-            return;
-          }
-
-          const ownerDiscordId = info.ownerDiscordId
-            ? String(info.ownerDiscordId)
-            : interaction.user.id;
-
-          try {
-            await createPaidKeyOnAPI(key, keyType, null, {
-              valid: true,
-              deleted: false,
-              createdAt: info.createdAt,
-              expiresAfter: info.expiresAfter,
-              byIp: 'discord-bot-redeem-any',
-              ownerDiscordId,
-            });
-          } catch (err) {
-            console.error(
-              'createPaidKeyOnAPI (redeem any) error:',
-              err
-            );
-            await interaction.editReply({
-              content:
-                'Key ditemukan, tapi gagal mengupdate status di API. Coba lagi beberapa saat lagi.',
-            });
-            return;
-          }
-
-          let labelType;
-          if (keyType === 'month') labelType = 'Key Sebulan';
-          else if (keyType === 'lifetime') labelType = 'Key Lifetime';
-          else labelType = `Key tipe "${info.type || 'unknown'}"`;
-
-          await interaction.editReply({
-            content:
-              `✅ ${labelType} berhasil digunakan!\n` +
-              `Key: \`${key}\`\n` +
-              'Terima kasih sudah menggunakan ExHub.',
-          });
-        } catch (err) {
-          console.error('validatePaidKey (any) error:', err);
-          await interaction.editReply({
-            content:
-              'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
-          });
-        }
-
+        await redeemPaidKeyFlow(interaction, key, 'any');
         return;
       }
 
-      // modal reset HWID
       if (customId === 'modal_reset_hwid') {
         await interaction.deferReply({ ephemeral: true });
 
@@ -3771,8 +3558,6 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ---------- REGISTER SLASH COMMANDS & LOGIN -------------------
-
 const commands = [
   new SlashCommandBuilder()
     .setName('sendticketpanel')
@@ -3851,6 +3636,21 @@ const commands = [
       opt
         .setName('channel')
         .setDescription('Channel tujuan leave')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('changenamechannel')
+    .setDescription('Ubah nama channel, contoh: #welcome → #✅️ ~ Verify')
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription('Channel yang ingin diganti namanya')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('name')
+        .setDescription('Nama channel baru, contoh: ✅️ ~ Verify')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
