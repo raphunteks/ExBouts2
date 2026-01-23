@@ -30,6 +30,8 @@ const {
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const crypto = require('crypto');
 const os = require('os'); // untuk /runtime spesifikasi VPS
+const fs = require('fs');      // <-- PENTING: untuk configrole.json
+const path = require('path');  // <-- PENTING: untuk configrole.json path
 
 // ---------- ENV & CONFIG ---------------------------------------
 
@@ -50,6 +52,7 @@ const OWNER_IDS = RAW_OWNER_IDS.split(/[,\s]+/).filter(Boolean);
 // kategori untuk ticket (opsional, bisa null)
 const TICKET_CATEGORY_ID =
   process.env.TICKET_CATEGORY_ID ||
+  process.env.CATTEGORY_TICKETCHANEL_ID ||
   process.env.CATTEGORY_TICKETCHANNEL_ID ||
   null;
 
@@ -81,8 +84,10 @@ const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
   'https://exc-webs.vercel.app/api/paidfree/user-info';
 
-// endpoint reset HWID (HARUS Anda isi ke route serverv2.js)
-const RESET_HWID_API_URL = process.env.RESET_HWID_API_URL || null;
+// endpoint reset HWID (serverv2.js)
+const RESET_HWID_API_URL =
+  process.env.RESET_HWID_API_URL ||
+  null;
 
 // endpoint script & dashboard (opsional, untuk tombol panel kontrol)
 const EXHUB_SCRIPT_URL = process.env.EXHUB_SCRIPT_URL || null;
@@ -106,12 +111,10 @@ const LEAVE_CARD_BG_URL =
 // QRIS image URL (gambar PNG/JPG QRIS kamu)
 const QRIS_IMAGE_URL = process.env.QRIS_IMAGE_URL || null;
 
-// role yang akan di-mention untuk NEW UPDATE SC + channel default (untuk /sendupdatesc)
+// role yang akan di-mention untuk NEW UPDATE SC + channel default
 const EVERYONE_ROLE_ID =
   process.env.EVERYONE_ROLE_ID || '1462774806079340574';
 const UPDATE_CHANNEL_ID = process.env.UPDATE_CHANNEL_ID || null;
-// Secret optional (digunakan juga untuk proteksi API reset HWID jika Anda mau)
-const ADMIN_UPDATE_SECRET = process.env.ADMIN_UPDATE_SECRET || null;
 
 // ---------- SERVER STATS CONFIG --------------------------------
 // Kategori + 4 channel untuk panel "📊 SERVER STATS 📊"
@@ -121,6 +124,11 @@ const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
+// Lokasi file persistent untuk reaction role
+const REACTION_ROLE_CONFIG_PATH =
+  process.env.REACTION_ROLE_CONFIG_PATH ||
+  path.join(__dirname, 'configrole.json');
+
 // harga default (bisa diubah pakai slash command)
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
@@ -129,10 +137,77 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 // ticketOwners: channelId -> userId
 const ticketOwners = new Map();
 
-// reaction role: messageId -> array { emoji, roleId }
+// reaction role: messageId -> array { emoji, roleId, roleName? }
+// (persisten via configrole.json)
 const reactionRoles = new Map();
+let reactionRoleStore = loadReactionRoleConfig();
+
+// reconstruct Map dari store
+for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
+  if (!Array.isArray(conf) || !conf.length) continue;
+  const normalized = conf
+    .filter(
+      (p) =>
+        p &&
+        typeof p === 'object' &&
+        typeof p.emoji === 'string' &&
+        typeof p.roleId === 'string'
+    )
+    .map((p) => ({
+      emoji: String(p.emoji),
+      roleId: String(p.roleId),
+      roleName: p.roleName ? String(p.roleName) : undefined,
+    }));
+
+  if (normalized.length) {
+    reactionRoles.set(messageId, normalized);
+  }
+}
+
+console.log(
+  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
+);
 
 // ---------- HELPER UTILS ---------------------------------------
+
+// Helper untuk load/simpan config reaction role ke file JSON
+function loadReactionRoleConfig() {
+  try {
+    if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
+      return {};
+    }
+    const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
+    if (!raw.trim()) return {};
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return {};
+    return data;
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal load configrole.json, menggunakan config kosong:',
+      err
+    );
+    return {};
+  }
+}
+
+function saveReactionRoleConfig(store) {
+  try {
+    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(
+      REACTION_ROLE_CONFIG_PATH,
+      JSON.stringify(store, null, 2),
+      'utf8'
+    );
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal menyimpan configrole.json:',
+      err
+    );
+  }
+}
 
 // sekarang support banyak OWNER_ID
 function isOwner(userId) {
@@ -166,7 +241,7 @@ function buildRuntimeMessage(client) {
 
   const mem = process.memoryUsage();
   const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(2);
-  const toGB = (bytes / 1024 / 1024 / 1024).toFixed(2);
+  const toGB = (bytes) => (bytes / 1024 / 1024 / 1024).toFixed(2);
 
   const guildCount = client.guilds.cache.size;
 
@@ -313,7 +388,6 @@ function mapStatusLabelAndColor(rawStatus) {
 
 /**
  * Build payload pesan NEW UPDATE SC (format pakai blok kode + header gaya manual)
- * Dipakai oleh slash command /sendupdatesc (bukan API lagi).
  */
 function buildScriptUpdatePayload(options, guild, clientInstance) {
   const scriptName = options.scriptName || options.script || 'UNKNOWN';
@@ -359,9 +433,13 @@ function buildScriptUpdatePayload(options, guild, clientInstance) {
   const changelogLines = formatLines(changeLogsList, '[+]');
   const nextUpdateLines = formatLines(nextUpdateList, '[⏭️]');
 
-  // ---------- resolve mention supaya tidak jadi "@@everyone" ----------
+  // ---------- FIX: resolve mention supaya tidak jadi "@@everyone" ----------
+  // Default: gunakan ping @everyone
   let mention = '@everyone';
 
+  // Jika disediakan EVERYONE_ROLE_ID dan role-nya valid serta NAMANYA tidak diawali '@',
+  // gunakan ping role (<@&ROLE_ID>). Kalau namanya diawali '@' (mis: "@everyone"),
+  // kita tetap fallback ke @everyone supaya tidak jadi "@@everyone".
   if (
     EVERYONE_ROLE_ID &&
     /^\d{5,}$/.test(EVERYONE_ROLE_ID) &&
@@ -566,11 +644,54 @@ function toNumber(value) {
 }
 
 /**
+ * Call API reset HWID untuk key tertentu.
+ * Body dikirim lengkap (key/token + identitas Discord).
+ */
+async function resetHwidOnAPI(key, discordUser) {
+  if (!RESET_HWID_API_URL) {
+    throw new Error('RESET_HWID_API_URL belum dikonfigurasi di .env');
+  }
+
+  // jaga-jaga: kirim key & token sekaligus
+  const payload = {
+    key,
+    token: key,
+    discordId: discordUser.id,
+    discordTag: discordUser.username
+      ? `${discordUser.username}#${discordUser.discriminator || '0000'}`
+      : String(discordUser.id),
+  };
+
+  const res = await fetch(RESET_HWID_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text().catch(() => '');
+  let json = null;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+  }
+
+  if (!res.ok) {
+    const msg =
+      (json && (json.error || json.message)) ||
+      text.slice(0, 200) ||
+      `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return json || { ok: true };
+}
+
+/**
  * Ambil semua key (paid + free) dan stats milik user dari /api/paidfree/user-info
  * Return: { paidKeys, freeKeys, allKeys, raw, stats }
- * - paidKeys/freeKeys/allKeys: array objek normalized:
- *   { token, type, provider, createdAtMs, expiresAfterMs, deleted, valid, expired, status, ownerDiscordId }
- * - stats: { totalExec, lastExecAtMs, executorName, subscription, totalClaimed, lastClaimAtMs }
  */
 async function fetchUserKeyInfo(discordUser) {
   if (!EXHUB_USERINFO_URL) {
@@ -869,6 +990,7 @@ async function logOrder(guild, embed) {
     console.error('Failed to send log order:', err);
   }
 }
+
 
 // ---------- WELCOME / LEAVE CARD HELPER (Canvas) -----------------------
 
@@ -1372,13 +1494,55 @@ client.on('messageReactionRemove', async (reaction, user) => {
   }
 });
 
+// Cleanup config kalau pesan reaction role dihapus
+client.on('messageDelete', (message) => {
+  try {
+    if (!message || !message.id) return;
+    if (!reactionRoles.has(message.id)) return;
+
+    reactionRoles.delete(message.id);
+    if (reactionRoleStore && reactionRoleStore[message.id]) {
+      delete reactionRoleStore[message.id];
+      saveReactionRoleConfig(reactionRoleStore);
+    }
+    console.log(
+      `[ReactionRole] Removed config for deleted message ${message.id}`
+    );
+  } catch (err) {
+    console.error('messageDelete (reaction role cleanup) error:', err);
+  }
+});
+
+client.on('messageDeleteBulk', (messages) => {
+  try {
+    let changed = false;
+    for (const [id] of messages) {
+      if (reactionRoles.has(id)) {
+        reactionRoles.delete(id);
+        if (reactionRoleStore && reactionRoleStore[id]) {
+          delete reactionRoleStore[id];
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      saveReactionRoleConfig(reactionRoleStore);
+      console.log(
+        '[ReactionRole] Cleaned up some reaction-role messages from bulk delete'
+      );
+    }
+  } catch (err) {
+    console.error('messageDeleteBulk (reaction role cleanup) error:', err);
+  }
+});
+
 // ---------- PANEL & TICKET HELPERS -----------------------------
 
 async function sendStorePanel(channel) {
   const embed = new EmbedBuilder()
     .setTitle('🎮 EXHUB STORE - Premium Scripts')
     .setDescription(
-      'Halo! Selamat datang di **EXHUB BETA** 👋\n\n' +
+      'Halo! Selamat datang di **EXHUB STORE** 👋\n\n' +
         'Kamu lagi cari script Roblox premium? Kamu datang ke tempat yang tepat!\n\n' +
         '✨ Script oke\n' +
         '💰 Harga bersahabat di kantong\n' +
@@ -1472,10 +1636,10 @@ async function sendTicketIntroMessage(channel, user) {
     '**Paket Tersedia**',
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (Akses 1 Script • 30 hari)`,
+    )} (Akses 5 Script • 30 hari)`,
     `🔥 Key Lifetime – Rp ${formatRupiah(
       priceKeyLifetime
-    )} (Akses 1 Script • 1 tahun)`,
+    )} (Akses 5 Script • 1 tahun)`,
     `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
       priceIndoHangout
     )} (1 Username • Permanent)`,
@@ -1502,7 +1666,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Sebulan',
         description: `Rp ${formatRupiah(
           priceKeyMonth
-        )} • 1 Script Premium (30 hari)`,
+        )} • 5 Script Premium (30 hari)`,
         value: 'KEY_MONTH',
         emoji: '⚡',
       },
@@ -1510,7 +1674,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Lifetime',
         description: `Rp ${formatRupiah(
           priceKeyLifetime
-        )} • 1 Script Premium (1 tahun)`,
+        )} • 5 Script Premium (1 tahun)`,
         value: 'KEY_LIFE',
         emoji: '🔥',
       },
@@ -1559,7 +1723,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!isOwner(interaction.user.id)) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan oleh OWNER bot.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return false;
         }
@@ -1572,7 +1736,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendStorePanel(interaction.channel);
         await interaction.reply({
           content: 'Panel ticket store sudah dikirim di channel ini.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1582,7 +1746,7 @@ client.on('interactionCreate', async (interaction) => {
         await sendControlPanel(interaction.channel, interaction.guild);
         await interaction.reply({
           content: 'Control panel utama sudah dikirim di channel ini.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1593,7 +1757,7 @@ client.on('interactionCreate', async (interaction) => {
         priceKeyMonth = harga;
         await interaction.reply({
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1606,7 +1770,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Lifetime** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1619,7 +1783,7 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Indo Hangout Premium** di-set ke Rp ${formatRupiah(
             harga
           )}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1661,7 +1825,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key sebulan dikirim ke DM ${target}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
 
           if (
@@ -1673,7 +1837,10 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, ephemeral: true });
+          await interaction.reply({
+            content: msg,
+            flags: MessageFlags.Ephemeral,
+          });
         }
       }
 
@@ -1715,7 +1882,7 @@ client.on('interactionCreate', async (interaction) => {
             .catch(() => console.warn('Failed to DM user key.'));
           await interaction.reply({
             content: `Key lifetime dikirim ke DM ${target}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
 
           if (
@@ -1727,7 +1894,10 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
         } else {
-          await interaction.reply({ content: msg, ephemeral: true });
+          await interaction.reply({
+            content: msg,
+            flags: MessageFlags.Ephemeral,
+          });
         }
       }
 
@@ -1774,7 +1944,7 @@ client.on('interactionCreate', async (interaction) => {
         welcomeChannelId = ch.id;
         await interaction.reply({
           content: `Welcome channel di-set ke ${ch}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1785,7 +1955,7 @@ client.on('interactionCreate', async (interaction) => {
         leaveChannelId = ch.id;
         await interaction.reply({
           content: `Leave channel di-set ke ${ch}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -1795,7 +1965,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya bisa digunakan di dalam server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -1837,7 +2007,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Config kosong. Contoh: `🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -1927,7 +2097,7 @@ client.on('interactionCreate', async (interaction) => {
             content:
               'Tidak ada pasangan emoji–role yang valid.\n' +
               'Contoh penggunaan: `/sendreactionrole config: 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #✅verify Lets verify`',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -1961,7 +2131,7 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({
               content:
                 'Tidak ada channel valid dan perintah tidak dijalankan di text channel. Periksa opsi `channels`.',
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
             return;
           }
@@ -1996,10 +2166,16 @@ client.on('interactionCreate', async (interaction) => {
             }
           }
 
-          reactionRoles.set(
-            msg.id,
-            parsed.map((p) => ({ emoji: p.emoji, roleId: p.roleId }))
-          );
+          // === PERSISTEN: simpan ke Map & file JSON ===
+          const msgConfig = parsed.map((p) => ({
+            emoji: p.emoji,
+            roleId: p.roleId,
+            roleName: p.roleName,
+          }));
+
+          reactionRoles.set(msg.id, msgConfig);
+          reactionRoleStore[msg.id] = msgConfig;
+          saveReactionRoleConfig(reactionRoleStore);
         }
 
         const uniqueChannels = [
@@ -2019,7 +2195,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: replyText });
       }
 
-      // /sendupdatesc (manual, bukan via HTTP API lagi)
+      // /sendupdatesc
       else if (commandName === 'sendupdatesc') {
         if (!(await ensureOwner())) return;
 
@@ -2027,7 +2203,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Perintah ini hanya bisa digunakan di dalam server (bukan DM).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2071,7 +2247,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Channel tujuan tidak valid untuk mengirim pesan (bukan text/announcement channel).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2092,14 +2268,17 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({
           content: `Pengumuman NEW UPDATE SC sudah dikirim ke ${targetChannel}.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       // /runtime
       else if (commandName === 'runtime') {
         const msg = buildRuntimeMessage(client);
-        await interaction.reply({ content: msg, ephemeral: true });
+        await interaction.reply({
+          content: msg,
+          flags: MessageFlags.Ephemeral,
+        });
       }
 
       // /mykey dan /checkmykey (paid only)
@@ -2229,7 +2408,10 @@ client.on('interactionCreate', async (interaction) => {
           scriptLine +
           '`';
 
-        await interaction.reply({ content: msg, ephemeral: true });
+        await interaction.reply({
+          content: msg,
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
@@ -2282,7 +2464,9 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Order:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+                lines.push(
+                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
+                );
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -2322,7 +2506,9 @@ client.on('interactionCreate', async (interaction) => {
                 lines.push(`**Claimed:** <t:${createdTs}:f>`);
               }
               if (expireTs) {
-                lines.push(`**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`);
+                lines.push(
+                  `**Expired:** <t:${expireTs}:f> • <t:${expireTs}:R>`
+                );
               }
               lines.push(`**Status:** ${k.status}`);
 
@@ -2351,30 +2537,31 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Reset HWID -> modal, lalu call API serverv2.js
+      // Reset HWID -> buka modal untuk input key lalu call API
       if (customId === 'control_reset_hwid') {
+        if (!RESET_HWID_API_URL) {
+          await interaction.reply({
+            content:
+              'Fitur **Reset HWID** belum dikonfigurasi. Minta admin mengisi `RESET_HWID_API_URL` di `.env` bot.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         const modal = new ModalBuilder()
           .setCustomId('modal_reset_hwid')
-          .setTitle('Reset HWID Paid Key');
+          .setTitle('Reset HWID ExHub');
 
-        const inputKey = new TextInputBuilder()
-          .setCustomId('field_reset_key')
-          .setLabel('Masukkan Paid Key yang ingin di-reset HWID-nya')
+        const input = new TextInputBuilder()
+          .setCustomId('field_reset_hwid_key')
+          .setLabel('Masukkan Paid Key (EXHUBPAID)')
           .setPlaceholder('EXHUBPAID-XXXX-XXXX-XXXX')
           .setStyle(TextInputStyle.Short)
           .setRequired(true);
 
-        const inputReason = new TextInputBuilder()
-          .setCustomId('field_reset_reason')
-          .setLabel('Alasan Reset HWID (opsional)')
-          .setPlaceholder('Contoh: Ganti device / install ulang Windows')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(false);
+        const row = new ActionRowBuilder().addComponents(input);
+        modal.addComponents(row);
 
-        const row1 = new ActionRowBuilder().addComponents(inputKey);
-        const row2 = new ActionRowBuilder().addComponents(inputReason);
-
-        modal.addComponents(row1, row2);
         await interaction.showModal(modal);
         return;
       }
@@ -2384,7 +2571,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di dalam server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2393,7 +2580,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'PAID_ROLE_ID belum dikonfigurasi di .env. Minta admin untuk mengisi ID role premium.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2573,7 +2760,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.guild) {
           await interaction.reply({
             content: 'Perintah ini hanya dapat digunakan di server.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2672,14 +2859,14 @@ client.on('interactionCreate', async (interaction) => {
         ) {
           await interaction.reply({
             content: 'Hanya pembuat ticket yang bisa membatalkan order ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan dihapus dalam 3 detik...',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
 
         setTimeout(() => {
@@ -2702,14 +2889,14 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya admin / owner yang dapat menutup ticket ini (Close Ticket).',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
         await interaction.reply({
           content: 'Ticket akan ditutup (channel dihapus) dalam 3 detik...',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
 
         setTimeout(() => {
@@ -2730,7 +2917,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat menginput ulang username Roblox.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2762,7 +2949,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat mengkonfirmasi username ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -2856,7 +3043,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({
             content:
               'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -3451,135 +3638,125 @@ client.on('interactionCreate', async (interaction) => {
 
       // modal reset HWID
       if (customId === 'modal_reset_hwid') {
-        // (fallback safety; idealnya tidak pernah masuk sini, karena ini ID modal, bukan button)
-        return;
-      }
-
-      return;
-    }
-
-    // MODAL SUBMIT untuk Reset HWID
-    if (interaction.isModalSubmit()) {
-      const { customId } = interaction;
-
-      if (customId === 'modal_reset_hwid') {
         await interaction.deferReply({ ephemeral: true });
 
         const rawKey = interaction.fields
-          .getTextInputValue('field_reset_key')
+          .getTextInputValue('field_reset_hwid_key')
           .trim();
-        const reasonRaw = interaction.fields
-          .getTextInputValue('field_reset_reason')
-          .trim();
+        const key = rawKey.toUpperCase();
 
-        if (!rawKey) {
+        if (!key) {
           await interaction.editReply({
             content: 'Key tidak boleh kosong.',
           });
           return;
         }
 
-        const key = rawKey.toUpperCase();
-        const reason =
-          reasonRaw || 'Reset HWID via Discord Control Panel (ExHub)';
-
-        try {
-          if (!RESET_HWID_API_URL) {
-            await interaction.editReply({
-              content:
-                'Fitur reset HWID belum dikonfigurasi di sisi server.\nMinta admin untuk mengisi `RESET_HWID_API_URL` di `.env` bot dan menyiapkan endpoint di serverv2.js.',
-            });
-            return;
-          }
-
-          // Pastikan key ini memang milik akun Discord yang meminta reset
-          let ownedKey = null;
-          try {
-            const paidKeys = await fetchUserPaidKeys(interaction.user);
-            ownedKey = paidKeys.find(
-              (k) => String(k.token).toUpperCase() === key
-            );
-          } catch (e) {
-            console.warn(
-              '[reset-hwid] Gagal cek kepemilikan key (user-info). Lanjutkan, akan divalidasi lagi di server.',
-              e
-            );
-          }
-
-          if (!ownedKey) {
-            // Masih boleh lanjut, tapi kita beri warning
-            await interaction.followUp({
-              content:
-                '⚠️ Peringatan: key tersebut tidak tercatat sebagai paid key milik akun Discord ini di API user-info.\n' +
-                'Jika tetap ingin melanjutkan, admin di server mungkin akan mengecek manual berdasarkan log.',
-              ephemeral: true,
-            });
-          }
-
-          const payload = {
-            key,
-            keyToken: key,
-            discordId: interaction.user.id,
-            discordTag: interaction.user.tag || interaction.user.username,
-            ownerDiscordId: interaction.user.id,
-            reason,
-            source: 'discord-bot-reset-hwid',
-          };
-
-          if (ownedKey && ownedKey.type) {
-            payload.type = ownedKey.type;
-          }
-          if (ADMIN_UPDATE_SECRET) {
-            payload.secret = ADMIN_UPDATE_SECRET;
-          }
-
-          const res = await fetch(RESET_HWID_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-
-          const text = await res.text();
-          let data = null;
-          try {
-            data = JSON.parse(text);
-          } catch (_) {
-            // jika bukan JSON, biarkan null
-          }
-
-          if (!res.ok || (data && data.ok === false)) {
-            const errorMessage =
-              (data &&
-                (data.error ||
-                  data.message ||
-                  data.robloxLockMessage)) ||
-              `Gagal reset HWID (HTTP ${res.status}).`;
-
-            await interaction.editReply({
-              content: `❌ Reset HWID gagal.\n${errorMessage}`,
-            });
-            return;
-          }
-
-          const successMessage =
-            (data &&
-              (data.message ||
-                data.robloxLockMessage)) ||
-            'Reset HWID berhasil. Silakan jalankan ulang ExHub Panel di device baru Anda.';
-
-          await interaction.editReply({
-            content: `✅ ${successMessage}`,
-          });
-        } catch (err) {
-          console.error('[reset-hwid] error:', err);
+        if (!RESET_HWID_API_URL) {
           await interaction.editReply({
             content:
-              'Terjadi kesalahan saat menghubungi server reset HWID. Coba lagi beberapa saat lagi atau hubungi admin.',
+              'Fitur Reset HWID belum dikonfigurasi. Minta admin mengisi `RESET_HWID_API_URL` di `.env` bot.',
           });
+          return;
+        }
+
+        try {
+          const result = await resetHwidOnAPI(key, interaction.user);
+
+          let ok = true;
+          let detail = '';
+          if (result && typeof result === 'object') {
+            if (typeof result.ok === 'boolean') ok = result.ok;
+            detail =
+              result.message ||
+              result.reason ||
+              result.error ||
+              '';
+          }
+
+          if (ok) {
+            let msg =
+              `✅ Reset HWID berhasil untuk key \`${key}\`.\n` +
+              'Silakan buka kembali ExHub Panel di Roblox dan login dari device baru kamu.';
+            if (detail) {
+              msg += `\n\nDetail: ${detail}`;
+            }
+            await interaction.editReply({ content: msg });
+
+            if (interaction.guild) {
+              const log = new EmbedBuilder()
+                .setTitle('♻️ HWID Reset Success')
+                .addFields(
+                  {
+                    name: 'Discord User',
+                    value: `${interaction.user} (${interaction.user.id})`,
+                  },
+                  { name: 'Key', value: `\`${key}\`` }
+                )
+                .setTimestamp()
+                .setColor(0x57f287);
+              await logOrder(interaction.guild, log);
+            }
+          } else {
+            let msg =
+              '❌ Reset HWID gagal. Silakan cek kembali key kamu atau hubungi admin.';
+            if (detail) {
+              msg += `\n\nDetail: ${detail}`;
+            }
+            await interaction.editReply({ content: msg });
+
+            if (interaction.guild) {
+              const log = new EmbedBuilder()
+                .setTitle('⚠️ HWID Reset Failed')
+                .addFields(
+                  {
+                    name: 'Discord User',
+                    value: `${interaction.user} (${interaction.user.id})`,
+                  },
+                  { name: 'Key', value: `\`${key}\`` },
+                  ...(detail
+                    ? [{ name: 'Detail', value: detail.slice(0, 1000) }]
+                    : [])
+                )
+                .setTimestamp()
+                .setColor(0xed4245);
+              await logOrder(interaction.guild, log);
+            }
+          }
+        } catch (err) {
+          console.error('resetHwidOnAPI error:', err);
+          const msg =
+            'Terjadi kesalahan saat menghubungi API reset HWID. Coba lagi beberapa saat lagi atau hubungi admin.';
+          await interaction.editReply({
+            content: `${msg}\n\nDetail teknis: \`${String(
+              err.message || err
+            ).slice(0, 180)}\``,
+          });
+
+          if (interaction.guild) {
+            const log = new EmbedBuilder()
+              .setTitle('⚠️ HWID Reset Error')
+              .addFields(
+                {
+                  name: 'Discord User',
+                  value: `${interaction.user} (${interaction.user.id})`,
+                },
+                { name: 'Key', value: `\`${key}\`` },
+                {
+                  name: 'Error',
+                  value: String(err.message || err).slice(0, 1000),
+                }
+              )
+              .setTimestamp()
+              .setColor(0xed4245);
+            await logOrder(interaction.guild, log);
+          }
         }
 
         return;
       }
+
+      return;
     }
   } catch (err) {
     console.error('interactionCreate error:', err);
@@ -3587,7 +3764,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
           content: 'Terjadi error internal saat memproses perintah.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (_) {}
@@ -3783,7 +3960,7 @@ const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   try {
     if (!DISCORD_TOKEN || !CLIENT_ID) {
       console.error(
-        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway.'
+        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway / VPS.'
       );
       return;
     }
