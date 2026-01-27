@@ -4096,7 +4096,7 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 10000)')
         .setRequired(true)
     ),
-    new SlashCommandBuilder()
+  new SlashCommandBuilder()
     .setName('setharga_indohangout')
     .setDescription('Ubah harga paket Indo Hangout Premium')
     .addIntegerOption((opt) =>
@@ -4105,7 +4105,6 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 10000)')
         .setRequired(true)
     ),
-
   new SlashCommandBuilder()
     .setName('disablepricelifetime')
     .setDescription('Aktifkan / nonaktifkan paket Key Lifetime di dropdown ticket')
@@ -4115,7 +4114,6 @@ const commands = [
         .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
-
   new SlashCommandBuilder()
     .setName('disableprice3month')
     .setDescription('Aktifkan / nonaktifkan paket Key 3 Bulan di dropdown ticket')
@@ -4125,7 +4123,6 @@ const commands = [
         .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
-
   new SlashCommandBuilder()
     .setName('disableprice6month')
     .setDescription('Aktifkan / nonaktifkan paket Key 6 Bulan di dropdown ticket')
