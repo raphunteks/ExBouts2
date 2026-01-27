@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const {
   Client,
   GatewayIntentBits,
@@ -1582,7 +1581,7 @@ async function sendStorePanel(channel) {
   const btn = new ButtonBuilder()
     .setCustomId('store_create_ticket')
     .setEmoji('📩')
-    .setLabel('Buat Ticket')
+    .setLabel('Create Ticket')
     .setStyle(ButtonStyle.Primary);
 
   const row = new ActionRowBuilder().addComponents(btn);
@@ -1655,6 +1654,79 @@ async function sendControlPanel(channel, guild) {
   await channel.send({ embeds: [embed], components: [row1, row2] });
 }
 
+/**
+ * PANEL BARU: pilih metode pembayaran (IDR / Server Booster)
+ */
+async function sendTicketPaymentMethodIntro(channel, user) {
+  const desc = [
+    `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
+    '',
+    '**Pilih Metode Pembayaran**',
+    '🇮🇩 **Order Paid Key ID (Rupiah)** — Pembayaran via QRIS / transfer Rupiah.',
+    '🚀 **Order Paid Key EN (Server Booster)** — Pembayaran menggunakan Nitro Server Boost.',
+    '',
+    'Silahkan pilih metode pembayaran pada menu di bawah untuk melanjutkan.',
+  ].join('\n');
+
+  const embed = new EmbedBuilder()
+    .setTitle('✨ Ticket Order Paid Key ✨')
+    .setDescription(desc)
+    .setColor(0x2b2d31);
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_select_payment_method')
+    .setPlaceholder('💳 Silahkan pilih metode pembayaran')
+    .addOptions(
+      {
+        label: 'Order Paid Key ID (Rupiah)',
+        description: 'Bayar dengan Rupiah (QRIS / transfer)',
+        value: 'PAY_IDR',
+        emoji: '🇮🇩',
+      },
+      {
+        label: 'Order Paid Key EN (Server Booster)',
+        description: 'Bayar dengan Nitro Server Boost (EN / Global)',
+        value: 'PAY_BOOST',
+        emoji: '🚀',
+      }
+    );
+
+  const rowSelect = new ActionRowBuilder().addComponents(select);
+
+  const btnCancel = new ButtonBuilder()
+    .setCustomId('ticket_cancel')
+    .setLabel('Cancel Order')
+    .setEmoji('❌')
+    .setStyle(ButtonStyle.Secondary);
+
+  const btnConfirm = new ButtonBuilder()
+    .setCustomId('ticket_confirm')
+    .setLabel('Confirm Order')
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Success);
+
+  const btnClose = new ButtonBuilder()
+    .setCustomId('ticket_close')
+    .setLabel('Close Ticket')
+    .setEmoji('🔒')
+    .setStyle(ButtonStyle.Danger);
+
+  const rowButtons = new ActionRowBuilder().addComponents(
+    btnCancel,
+    btnConfirm,
+    btnClose
+  );
+
+  await channel.send({
+    content: `<@${user.id}>`,
+    embeds: [embed],
+    components: [rowSelect, rowButtons],
+  });
+}
+
+/**
+ * PANEL LAMA: Rupiah (QRIS) – tetap dipakai untuk jalur IDR
+ */
 async function sendTicketIntroMessage(channel, user) {
   const desc = [
     `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
@@ -1680,7 +1752,7 @@ async function sendTicketIntroMessage(channel, user) {
   ].join('\n');
 
   const embed = new EmbedBuilder()
-    .setTitle('✨ Ticket VIP Order')
+    .setTitle('✨ Ticket Order Paid Key ✨')
     .setDescription(desc)
     .setColor(0xfee75c);
 
@@ -1692,7 +1764,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Sebulan',
         description: `Rp ${formatRupiah(
           priceKeyMonth
-        )} • 1 Script Premium (30 hari)`,
+        )} • 2 Script Premium (30 hari)`,
         value: 'KEY_MONTH',
         emoji: '⚡',
       },
@@ -1700,7 +1772,7 @@ async function sendTicketIntroMessage(channel, user) {
         label: 'Key Lifetime',
         description: `Rp ${formatRupiah(
           priceKeyLifetime
-        )} • 1 Script Premium (1 tahun)`,
+        )} • 2 Script Premium (1 tahun)`,
         value: 'KEY_LIFE',
         emoji: '🔥',
       },
@@ -1741,7 +1813,79 @@ async function sendTicketIntroMessage(channel, user) {
   );
 
   await channel.send({
-    content: `<@${user.id}>`,
+    embeds: [embed],
+    components: [rowSelect, rowButtons],
+  });
+}
+
+/**
+ * PANEL BARU: Server Booster EN
+ */
+async function sendTicketIntroMessage2(channel, user) {
+  const desc = [
+    `Hi ${user}, thanks for opening a **Server Booster** order ticket.`,
+    '',
+    '**Available Packages**',
+    '🚀 Key 1 Month – 3x Server Booster (30 days access)',
+    '🚀 Key 3 Months – 5x Server Booster (90 days access)',
+    '',
+    '**Next Steps**',
+    '1. Choose your package from the dropdown below.',
+    '2. Boost this server according to the requirement.',
+    '3. Send screenshots of your active boosts in this ticket channel.',
+    '4. Wait for staff to verify and deliver your key.',
+  ].join('\n');
+
+  const embed = new EmbedBuilder()
+    .setTitle('✨ Ticket Order Paid Key — Server Booster ✨')
+    .setDescription(desc)
+    .setColor(0x5865f2);
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_select_boost_package')
+    .setPlaceholder('📦 Please select your order')
+    .addOptions(
+      {
+        label: 'Key 1 Month',
+        description: '3x Server Booster (30 days)',
+        value: 'BOOST_1M',
+        emoji: '🚀',
+      },
+      {
+        label: 'Key 3 Months',
+        description: '5x Server Booster (90 days)',
+        value: 'BOOST_3M',
+        emoji: '🚀',
+      }
+    );
+
+  const rowSelect = new ActionRowBuilder().addComponents(select);
+
+  const btnCancel = new ButtonBuilder()
+    .setCustomId('ticket_cancel')
+    .setLabel('Cancel Order')
+    .setEmoji('❌')
+    .setStyle(ButtonStyle.Secondary);
+
+  const btnConfirm = new ButtonBuilder()
+    .setCustomId('ticket_confirm')
+    .setLabel('Confirm Order')
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Success);
+
+  const btnClose = new ButtonBuilder()
+    .setCustomId('ticket_close')
+    .setLabel('Close Ticket')
+    .setEmoji('🔒')
+    .setStyle(ButtonStyle.Danger);
+
+  const rowButtons = new ActionRowBuilder().addComponents(
+    btnCancel,
+    btnConfirm,
+    btnClose
+  );
+
+  await channel.send({
     embeds: [embed],
     components: [rowSelect, rowButtons],
   });
@@ -2822,7 +2966,8 @@ client.on('interactionCreate', async (interaction) => {
           content: `Ticket kamu sudah dibuat: ${channel}`,
         });
 
-        await sendTicketIntroMessage(channel, interaction.user);
+        // PERUBAHAN: setelah ticket dibuat, kirim panel PILIH METODE PEMBAYARAN
+        await sendTicketPaymentMethodIntro(channel, interaction.user);
 
         const logEmbed = new EmbedBuilder()
           .setTitle('🎫 Ticket Baru Dibuat')
@@ -2894,9 +3039,19 @@ client.on('interactionCreate', async (interaction) => {
         const ownerId = getTicketOwnerId(interaction.channel);
         const order = ticketOrders.get(interaction.channel.id);
 
+        if (!order) {
+          await interaction.reply({
+            content:
+              'Belum ada paket order yang dipilih di ticket ini. Minta user memilih paket dahulu dari dropdown yang tersedia.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
         let paidLabel = 'Unknown';
         let nominal = 0;
         let expiresMs = null;
+        let paymentNote = null;
 
         if (order && order.type === 'KEY_MONTH') {
           paidLabel = 'Key Sebulan';
@@ -2911,6 +3066,18 @@ client.on('interactionCreate', async (interaction) => {
         } else if (order && order.type === 'INDO_VIP') {
           paidLabel = 'Indo Hangout Premium';
           nominal = priceIndoHangout;
+        } else if (order && order.type === 'BOOST_1M') {
+          paidLabel = 'Key 1 Month (Server Booster)';
+          nominal = 0;
+          const createdAt = order.timestamp || Date.now();
+          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
+          paymentNote = '3x Server Booster (30 days)';
+        } else if (order && order.type === 'BOOST_3M') {
+          paidLabel = 'Key 3 Months (Server Booster)';
+          nominal = 0;
+          const createdAt = order.timestamp || Date.now();
+          expiresMs = createdAt + 90 * 24 * 60 * 60 * 1000;
+          paymentNote = '5x Server Booster (90 days)';
         }
 
         let expiredText = '-';
@@ -2925,10 +3092,15 @@ client.on('interactionCreate', async (interaction) => {
           ? `<@${ownerId}>`
           : `${interaction.user}`;
 
-        const nominalText =
-          nominal && nominal > 0
-            ? `Rp. ${formatRupiah(nominal)}`
-            : 'Rp. -';
+        let nominalText;
+        if (paymentNote) {
+          nominalText = paymentNote;
+        } else {
+          nominalText =
+            nominal && nominal > 0
+              ? `Rp. ${formatRupiah(nominal)}`
+              : 'Rp. -';
+        }
 
         const content =
           '**✅️ Sukses Order Key 🔑**\n' +
@@ -3117,6 +3289,43 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isStringSelectMenu()) {
       const { customId } = interaction;
+
+      // PILIH METODE PEMBAYARAN (IDR / BOOST)
+      if (customId === 'ticket_select_payment_method') {
+        const [value] = interaction.values;
+        const ownerId = getTicketOwnerId(interaction.channel);
+
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya pembuat ticket yang dapat memilih metode pembayaran di ticket ini.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        if (value === 'PAY_IDR') {
+          await sendTicketIntroMessage(interaction.channel, interaction.user);
+          await interaction.reply({
+            content:
+              '✅ Metode pembayaran **Rupiah (QRIS)** dipilih. Silahkan pilih paket di panel baru.',
+            flags: MessageFlags.Ephemeral,
+          });
+        } else if (value === 'PAY_BOOST') {
+          await sendTicketIntroMessage2(interaction.channel, interaction.user);
+          await interaction.reply({
+            content:
+              '✅ Payment method **Server Booster** selected. Please choose your package in the new panel.',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+
+        return;
+      }
+
       if (customId === 'ticket_select_package') {
         const [value] = interaction.values;
         const ownerId = getTicketOwnerId(interaction.channel);
@@ -3236,6 +3445,82 @@ client.on('interactionCreate', async (interaction) => {
           const row = new ActionRowBuilder().addComponents(input);
           modal.addComponents(row);
           await interaction.showModal(modal);
+        }
+
+        return;
+      }
+
+      // PILIH PAKET SERVER BOOSTER
+      if (customId === 'ticket_select_boost_package') {
+        const [value] = interaction.values;
+        const ownerId = getTicketOwnerId(interaction.channel);
+
+        if (
+          interaction.user.id !== ownerId &&
+          !isOwner(interaction.user.id)
+        ) {
+          await interaction.reply({
+            content:
+              'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        if (value === 'BOOST_1M') {
+          ticketOrders.set(interaction.channel.id, {
+            type: 'BOOST_1M',
+            price: 0,
+            timestamp: Date.now(),
+          });
+
+          const instruksi = new EmbedBuilder()
+            .setTitle('✨ Payment Instructions — 1 Month Key (Server Booster)')
+            .setDescription(
+              'Please pay using **Discord Nitro Server Boost**.\n\n' +
+                '**Package Details**\n' +
+                '• Key Type   : 1 Month Paid Key\n' +
+                '• Requirement: 3x Server Booster on this server\n' +
+                '• Access     : 30 days from activation\n\n' +
+                '**Steps**\n' +
+                '1. Boost this server **3 times**.\n' +
+                '2. Take a screenshot of your active boosts.\n' +
+                '3. Send the screenshot here.\n' +
+                '4. Wait for staff to verify and send your key.'
+            )
+            .setColor(0x5865f2);
+
+          await interaction.reply({
+            content: `✅ Please pay with **3x Server Booster** and send screenshots here ${interaction.user}`,
+            embeds: [instruksi],
+          });
+        } else if (value === 'BOOST_3M') {
+          ticketOrders.set(interaction.channel.id, {
+            type: 'BOOST_3M',
+            price: 0,
+            timestamp: Date.now(),
+          });
+
+          const instruksi = new EmbedBuilder()
+            .setTitle('✨ Payment Instructions — 3 Months Key (Server Booster)')
+            .setDescription(
+              'Please pay using **Discord Nitro Server Boost**.\n\n' +
+                '**Package Details**\n' +
+                '• Key Type   : 3 Months Paid Key\n' +
+                '• Requirement: 5x Server Booster on this server\n' +
+                '• Access     : 90 days from activation\n\n' +
+                '**Steps**\n' +
+                '1. Boost this server **5 times**.\n' +
+                '2. Take a screenshot of your active boosts.\n' +
+                '3. Send the screenshot here.\n' +
+                '4. Wait for staff to verify and send your key.'
+            )
+            .setColor(0x5865f2);
+
+          await interaction.reply({
+            content: `✅ Please pay with **5x Server Booster** and send screenshots here ${interaction.user}`,
+            embeds: [instruksi],
+          });
         }
 
         return;
