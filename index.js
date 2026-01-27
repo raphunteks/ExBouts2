@@ -4066,9 +4066,11 @@ const commands = [
   new SlashCommandBuilder()
     .setName('sendticketpanel')
     .setDescription('Kirim panel store / ticket di channel ini'),
+
   new SlashCommandBuilder()
     .setName('sendcontrolpanel')
     .setDescription('Kirim control panel utama ExHub di channel ini'),
+
   new SlashCommandBuilder()
     .setName('setharga_sebulan')
     .setDescription('Ubah harga paket Key Sebulan')
@@ -4078,6 +4080,7 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 15000)')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('setharga_lifetime')
     .setDescription('Ubah harga paket Key Lifetime')
@@ -4087,6 +4090,7 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 25000)')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('setharga_indohangout')
     .setDescription('Ubah harga paket Indo Hangout Premium')
@@ -4096,15 +4100,8 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 10000)')
         .setRequired(true)
     ),
-  new SlashCommandBuilder()
-    .setName('setharga_indohangout')
-    .setDescription('Ubah harga paket Indo Hangout Premium')
-    .addIntegerOption((opt) =>
-      opt
-        .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 10000)')
-        .setRequired(true)
-    ),
+
+  // ====== FLAG ENABLE/DISABLE PAKET DI DROPDOWN ======
   new SlashCommandBuilder()
     .setName('disablepricelifetime')
     .setDescription('Aktifkan / nonaktifkan paket Key Lifetime di dropdown ticket')
@@ -4114,6 +4111,7 @@ const commands = [
         .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('disableprice3month')
     .setDescription('Aktifkan / nonaktifkan paket Key 3 Bulan di dropdown ticket')
@@ -4123,6 +4121,7 @@ const commands = [
         .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('disableprice6month')
     .setDescription('Aktifkan / nonaktifkan paket Key 6 Bulan di dropdown ticket')
@@ -4132,6 +4131,8 @@ const commands = [
         .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
+
+  // ====== GENERATE & REDEEM KEY ======
   new SlashCommandBuilder()
     .setName('generatekeysebulan')
     .setDescription('Generate key sebulan untuk member')
@@ -4143,6 +4144,7 @@ const commands = [
         )
         .setRequired(false)
     ),
+
   new SlashCommandBuilder()
     .setName('generatekeylifetime')
     .setDescription('Generate key lifetime untuk member')
@@ -4154,12 +4156,16 @@ const commands = [
         )
         .setRequired(false)
     ),
+
   new SlashCommandBuilder()
     .setName('redeemkeysebulan')
-    .setDescription('Redeem key sebulan (muncul modal input key)'),
+    .setDescription('Redeem key sebulan (muncul modal input key)'),  
+
   new SlashCommandBuilder()
     .setName('redeemkeylifetime')
-    .setDescription('Redeem key lifetime (muncul modal input key)'),
+    .setDescription('Redeem key lifetime (muncul modal input key)'),  
+
+  // ====== WELCOME / LEAVE / CHANNEL TOOLS ======
   new SlashCommandBuilder()
     .setName('setwelcomechannel')
     .setDescription('Set channel untuk welcome message')
@@ -4169,6 +4175,7 @@ const commands = [
         .setDescription('Channel tujuan welcome')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('setleavechannel')
     .setDescription('Set channel untuk leave message')
@@ -4178,6 +4185,7 @@ const commands = [
         .setDescription('Channel tujuan leave')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('changenamechannel')
     .setDescription('Ubah nama channel, contoh: #welcome → #✅️ ~ Verify')
@@ -4193,11 +4201,14 @@ const commands = [
         .setDescription('Nama channel baru, contoh: ✅️ ~ Verify')
         .setRequired(true)
     ),
+
   new SlashCommandBuilder()
     .setName('refreshserverstats')
     .setDescription(
       'Refresh nama channel SERVER STATS (All Members, Members, Bots, Boosts)'
     ),
+
+  // ====== UPDATE SCRIPT ======
   new SlashCommandBuilder()
     .setName('sendupdatesc')
     .setDescription('Kirim pengumuman NEW UPDATE SC untuk suatu script')
@@ -4254,6 +4265,8 @@ const commands = [
         )
         .setRequired(false)
     ),
+
+  // ====== REACTION ROLE ======
   new SlashCommandBuilder()
     .setName('sendreactionrole')
     .setDescription(
@@ -4283,12 +4296,16 @@ const commands = [
         )
         .setRequired(false)
     ),
+
+  // ====== UTIL ======
   new SlashCommandBuilder()
     .setName('runtime')
     .setDescription('Lihat runtime & spesifikasi core VPS untuk bot ini'),
+
   new SlashCommandBuilder()
     .setName('mykey')
     .setDescription('Lihat semua paid key yang terikat ke akun Discord kamu'),
+
   new SlashCommandBuilder()
     .setName('checkmykey')
     .setDescription('Alias dari /mykey untuk cek semua paid key kamu'),
