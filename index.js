@@ -103,6 +103,15 @@ let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
+// HARGA EMOTES BARU
+let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 30000);
+let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 50000);
+
+// FLAG ENABLE/DISABLE DROPDOWN PAKET
+let isLifetimeEnabled = true;
+let isEmote3MonthEnabled = true;
+let isEmote6MonthEnabled = true;
+
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
 const reactionRoles = new Map();
@@ -1339,7 +1348,7 @@ async function redeemPaidKeyFlow(interaction, key, mode) {
         'Terima kasih sudah menggunakan ExHub.',
     });
   } catch (err) {
-    console.error(`validatePaidKey (${mode}) error:`, err);
+    console.error(`validatePaidKey (${mode}) error:', err`);
     await interaction.editReply({
       content:
         'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
@@ -1568,13 +1577,13 @@ async function sendStorePanel(channel) {
   const embed = new EmbedBuilder()
     .setTitle('🎮 ExHub Paid Scripts 🎮 ')
     .setDescription(
-      'Halo! Selamat datang di **EXHUB [BETA]** 👋\n\n' +
-        'Kamu lagi cari script Roblox premium? Kamu datang ke tempat yang tepat!\n\n' +
-        '✨ Script berkualitas\n' +
-        '💰 Harga sangat terjangkau\n' +
-        '⚡ Respon cepat dari admin\n\n' +
-        'Klik tombol **📩 Buat Ticket** di bawah untuk mulai order yaahh :D\n' +
-        'Kami siap bantu kamu 24/7 🙂'
+      'Hi! Welcome to **EXHUB [BETA]** 👋\n\n' +
+        'Looking for premium Roblox scripts? You’ve come to the right place!\n\n' +
+        '✨ High-quality scripts\n' +
+        '💰 Very affordable prices\n' +
+        '⚡ Fast response from the admins\n\n' +
+        'Click the **📩 Create Ticket** button below to start your order :D\n' +
+        'We’re ready to help you 24/7 🙂'
     )
     .setColor(0x2b2d31);
 
@@ -1659,13 +1668,13 @@ async function sendControlPanel(channel, guild) {
  */
 async function sendTicketPaymentMethodIntro(channel, user) {
   const desc = [
-    `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
+    `Halo ${user}, terima kasih telah membuat ticket order paid key.`,
     '',
     '**Pilih Metode Pembayaran**',
-    '🇮🇩 **Order Paid Key ID (Rupiah)** — Pembayaran via QRIS / transfer Rupiah.',
-    '🚀 **Order Paid Key EN (Server Booster)** — Pembayaran menggunakan Nitro Server Boost.',
+    '🇮🇩 **Order Paid Key ID (Rupiah)** — Pembayaran via QRIS (transfer Rupiah).',
+    '🚀 **Order Paid Key EN (Server Booster)** — Payment using Nitro Server Boost.',
     '',
-    'Silahkan pilih metode pembayaran pada menu di bawah untuk melanjutkan.',
+    'Please select a payment method from the menu below to continue.',
   ].join('\n');
 
   const embed = new EmbedBuilder()
@@ -1675,17 +1684,17 @@ async function sendTicketPaymentMethodIntro(channel, user) {
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('ticket_select_payment_method')
-    .setPlaceholder('💳 Silahkan pilih metode pembayaran')
+    .setPlaceholder('💳 Please select a payment method')
     .addOptions(
       {
         label: 'Order Paid Key ID (Rupiah)',
-        description: 'Bayar dengan Rupiah (QRIS / transfer)',
+        description: 'Bayar dengan Rupiah (QRIS)',
         value: 'PAY_IDR',
         emoji: '🇮🇩',
       },
       {
         label: 'Order Paid Key EN (Server Booster)',
-        description: 'Bayar dengan Nitro Server Boost (EN / Global)',
+        description: 'Pay with Nitro Server Boost (EN / Global)',
         value: 'PAY_BOOST',
         emoji: '🚀',
       }
@@ -1728,19 +1737,54 @@ async function sendTicketPaymentMethodIntro(channel, user) {
  * PANEL LAMA: Rupiah (QRIS) – tetap dipakai untuk jalur IDR
  */
 async function sendTicketIntroMessage(channel, user) {
-  const desc = [
+  const lines = [
     `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
     '',
     '**Paket Tersedia**',
+  ];
+
+  // Key Sebulan selalu ada
+  lines.push(
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (Akses 1 Script • 30 hari)`,
-    `🔥 Key Lifetime – Rp ${formatRupiah(
-      priceKeyLifetime
-    )} (Akses 1 Script • 1 tahun)`,
+    )} (Akses 1 Script • 30 hari)`
+  );
+
+  // Lifetime hanya jika enabled
+  if (isLifetimeEnabled) {
+    lines.push(
+      `🔥 Key Lifetime – Rp ${formatRupiah(
+        priceKeyLifetime
+      )} (Akses 1 Script • 1 tahun)`
+    );
+  }
+
+  // Emotes Key 3 Bulan (dropdown baru)
+  if (isEmote3MonthEnabled) {
+    lines.push(
+      `🎭 Emotes Key 3 Bulan – Rp ${formatRupiah(
+        priceKey3Month
+      )} (Akses emote premium • 90 hari)`
+    );
+  }
+
+  // Emotes Key 6 Bulan (dropdown baru)
+  if (isEmote6MonthEnabled) {
+    lines.push(
+      `🎭 Emotes Key 6 Bulan – Rp ${formatRupiah(
+        priceKey6Month
+      )} (Akses emote premium • 180 hari)`
+    );
+  }
+
+  // Indo Hangout tetap
+  lines.push(
     `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
       priceIndoHangout
-    )} (1 Username • Permanent)`,
+    )} (1 Username • Permanent)`
+  );
+
+  lines.push(
     '',
     '**Langkah Selanjutnya**',
     '1. Pilih paket dari dropdown list menu di bawah.',
@@ -1748,8 +1792,10 @@ async function sendTicketIntroMessage(channel, user) {
     '3. Upload bukti bayar (screenshot QRIS) di channel ini.',
     '4. Tunggu konfirmasi admin ✅',
     '',
-    '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.',
-  ].join('\n');
+    '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.'
+  );
+
+  const desc = lines.join('\n');
 
   const embed = new EmbedBuilder()
     .setTitle('✨ Ticket Order Paid Key ✨')
@@ -1758,33 +1804,67 @@ async function sendTicketIntroMessage(channel, user) {
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('ticket_select_package')
-    .setPlaceholder('📦 Silahkan pilih orderan Anda')
-    .addOptions(
-      {
-        label: 'Key Sebulan',
-        description: `Rp ${formatRupiah(
-          priceKeyMonth
-        )} • 2 Script Premium (30 hari)`,
-        value: 'KEY_MONTH',
-        emoji: '⚡',
-      },
-      {
-        label: 'Key Lifetime',
-        description: `Rp ${formatRupiah(
-          priceKeyLifetime
-        )} • 2 Script Premium (1 tahun)`,
-        value: 'KEY_LIFE',
-        emoji: '🔥',
-      },
-      {
-        label: 'Indo Hangout Premium',
-        description: `Rp ${formatRupiah(
-          priceIndoHangout
-        )} • 1 Username (Permanent)`,
-        value: 'INDO_VIP',
-        emoji: '🇮🇩',
-      }
-    );
+    .setPlaceholder('📦 Silahkan pilih orderan Anda');
+
+  const options = [];
+
+  // Key Sebulan
+  options.push({
+    label: 'Key Sebulan',
+    description: `Rp ${formatRupiah(
+      priceKeyMonth
+    )} • 2 Script Premium (30 hari)`,
+    value: 'KEY_MONTH',
+    emoji: '⚡',
+  });
+
+  // Key Lifetime jika enabled
+  if (isLifetimeEnabled) {
+    options.push({
+      label: 'Key Lifetime',
+      description: `Rp ${formatRupiah(
+        priceKeyLifetime
+      )} • 2 Script Premium (1 tahun)`,
+      value: 'KEY_LIFE',
+      emoji: '🔥',
+    });
+  }
+
+  // Emotes Key 3 Bulan jika enabled
+  if (isEmote3MonthEnabled) {
+    options.push({
+      label: 'Emotes Key 3 Bulan',
+      description: `Rp ${formatRupiah(
+        priceKey3Month
+      )} • Akses emote premium (90 hari)`,
+      value: 'EMOTE_3M',
+      emoji: '🎭',
+    });
+  }
+
+  // Emotes Key 6 Bulan jika enabled
+  if (isEmote6MonthEnabled) {
+    options.push({
+      label: 'Emotes Key 6 Bulan',
+      description: `Rp ${formatRupiah(
+        priceKey6Month
+      )} • Akses emote premium (180 hari)`,
+      value: 'EMOTE_6M',
+      emoji: '🎭',
+    });
+  }
+
+  // Indo Hangout tetap selalu ada
+  options.push({
+    label: 'Indo Hangout Premium',
+    description: `Rp ${formatRupiah(
+      priceIndoHangout
+    )} • 1 Username (Permanent)`,
+    value: 'INDO_VIP',
+    emoji: '🇮🇩',
+  });
+
+  select.addOptions(options);
 
   const rowSelect = new ActionRowBuilder().addComponents(select);
 
@@ -1949,6 +2029,34 @@ client.on('interactionCreate', async (interaction) => {
           )}.`,
           flags: MessageFlags.Ephemeral,
         });
+
+      // TOGGLE ENABLE/DISABLE PAKET LIFETIME
+      } else if (commandName === 'disablepricelifetime') {
+        if (!(await ensureOwner())) return;
+        isLifetimeEnabled = !isLifetimeEnabled;
+        await interaction.reply({
+          content: `Paket **Key Lifetime** sekarang: **${isLifetimeEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+
+      // TOGGLE ENABLE/DISABLE EMOTES 3 BULAN
+      } else if (commandName === 'disableprice3month') {
+        if (!(await ensureOwner())) return;
+        isEmote3MonthEnabled = !isEmote3MonthEnabled;
+        await interaction.reply({
+          content: `Paket **Emotes Key 3 Bulan** sekarang: **${isEmote3MonthEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+
+      // TOGGLE ENABLE/DISABLE EMOTES 6 BULAN
+      } else if (commandName === 'disableprice6month') {
+        if (!(await ensureOwner())) return;
+        isEmote6MonthEnabled = !isEmote6MonthEnabled;
+        await interaction.reply({
+          content: `Paket **Emotes Key 6 Bulan** sekarang: **${isEmote6MonthEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+
       } else if (commandName === 'generatekeysebulan') {
         if (!(await ensureOwner())) return;
         const target = interaction.options.getUser('member', false);
@@ -2739,41 +2847,40 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
           const info = await fetchUserKeyInfo(interaction.user);
-          const activePaid = info.paidKeys.filter(
-            (k) => k.status === 'Active'
+          const activePaid =
+          const info = await fetchUserKeyInfo(interaction.user);
+          const activePaid = (info.paidKeys || []).filter(
+            (k) => k.valid && !k.deleted && !k.expired
           );
 
           if (!activePaid.length) {
-            const orderMention = ORDER_PAID_CHANNEL_ID
-              ? `<#${ORDER_PAID_CHANNEL_ID}>`
-              : '#order-paid';
-
             await interaction.editReply({
               content:
-                `❌ You don't have an active paid key.\n` +
-                `Please order a paid month or lifetime key first in ${orderMention}.`,
+                'Tidak ditemukan paid key aktif di akun kamu. Pastikan sudah redeem key terlebih dahulu.',
             });
             return;
           }
 
           if (member.roles.cache.has(role.id)) {
             await interaction.editReply({
-              content: `Kamu sudah memiliki role premium ${role}.`,
+              content: `Kamu sudah memiliki role premium ${role} di server ini.`,
             });
             return;
           }
 
           await member.roles.add(role);
+
           await interaction.editReply({
-            content: `✅ Kamu sudah diberikan role premium ${role} karena memiliki paid key aktif.`,
+            content: `✅ Role premium ${role} berhasil diberikan. Terima kasih sudah mendukung ExHub!`,
           });
         } catch (err) {
           console.error('control_claim_role error:', err);
           await interaction.editReply({
             content:
-              'Terjadi kesalahan saat mengecek key / memberikan role. Coba lagi atau hubungi admin.',
+              'Terjadi kesalahan saat memproses claim role. Coba lagi beberapa saat lagi atau hubungi admin.',
           });
         }
+
         return;
       }
 
@@ -2782,118 +2889,61 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
           const info = await fetchUserKeyInfo(interaction.user);
-          const { paidKeys, freeKeys, allKeys, stats } = info;
-
-          const totalKeys = allKeys.length;
-          const activePaid = paidKeys.filter((k) => k.status === 'Active');
-
-          const monthCount = paidKeys.filter((k) => k.type === 'month').length;
-          const lifeCount = paidKeys.filter(
-            (k) => k.type === 'lifetime'
-          ).length;
-          const otherPaid = paidKeys.length - monthCount - lifeCount;
-
-          const freeByProvider = {};
-          for (const k of freeKeys) {
-            let prov = k.provider || 'unknown';
-            if (
-              prov.includes('work.ink') ||
-              prov === 'work.ink' ||
-              prov === 'workink'
-            ) {
-              prov = 'Work.ink';
-            } else if (prov.includes('linkvertise')) {
-              prov = 'Linkvertise';
-            }
-            freeByProvider[prov] = (freeByProvider[prov] || 0) + 1;
-          }
-
-          const totalExec = stats.totalExec ?? 0;
-          const executorName = stats.executorName || 'Unknown';
-          const lastExecTs = stats.lastExecAtMs
-            ? Math.floor(stats.lastExecAtMs / 1000)
-            : null;
-          const lastClaimTs = stats.lastClaimAtMs
-            ? Math.floor(stats.lastClaimAtMs / 1000)
-            : null;
+          const { stats } = info || {};
 
           const embed = new EmbedBuilder()
-            .setTitle('Your Stats')
-            .setDescription(
-              'Summary of your account statistics.\nView detailed key information via the **Check Key** button.'
-            )
-            .setColor(0x2b2d31);
+            .setTitle('📊 Your ExHub Stats')
+            .setColor(0x5865f2);
 
-          embed.addFields(
-            {
-              name: 'Total Keys',
-              value: String(totalKeys),
-              inline: true,
-            },
-            {
-              name: 'Paid Keys',
-              value: paidKeys.length
-                ? [
-                    `Total: **${paidKeys.length}**`,
-                    `Month: **${monthCount}**`,
-                    `Lifetime: **${lifeCount}**`,
-                    otherPaid > 0 ? `Other: **${otherPaid}**` : null,
-                    `Active: **${activePaid.length}**`,
-                  ]
-                    .filter(Boolean)
-                    .join('\n')
-                : '0',
-              inline: true,
-            },
-            {
-              name: 'Free Keys',
-              value:
-                freeKeys.length === 0
-                  ? '0'
-                  : Object.entries(freeByProvider)
-                      .map(([prov, count]) => `${prov}: **${count}**`)
-                      .join('\n'),
-              inline: true,
-            }
-          );
+          const lines = [];
 
-          const execLines = [];
-          execLines.push(`Total Executes: **${totalExec}**`);
-          execLines.push(`Executor: **${executorName}**`);
-          if (lastExecTs) {
-            execLines.push(`Last Use: <t:${lastExecTs}:R>`);
-          }
-          if (stats.totalClaimed != null) {
-            execLines.push(`Total Claimed: **${stats.totalClaimed}**`);
-          }
-          if (lastClaimTs) {
-            execLines.push(`Last Claimed: <t:${lastClaimTs}:R>`);
-          }
-          if (stats.subscription) {
-            execLines.push(`Subscription: **${stats.subscription}**`);
+          if (stats && stats.subscription) {
+            lines.push(`**Subscription:** ${stats.subscription}`);
           }
 
-          embed.addFields({
-            name: 'Execution Stats',
-            value: execLines.join('\n'),
-            inline: false,
-          });
+          if (stats && typeof stats.totalExec === 'number') {
+            lines.push(`**Total Executions:** ${stats.totalExec}`);
+          }
+
+          if (stats && stats.lastExecAtMs) {
+            const ts = Math.floor(stats.lastExecAtMs / 1000);
+            lines.push(`**Last Execution:** <t:${ts}:f> • <t:${ts}:R>`);
+          }
+
+          if (stats && typeof stats.totalClaimed === 'number') {
+            lines.push(`**Total Daily Claims:** ${stats.totalClaimed}`);
+          }
+
+          if (stats && stats.lastClaimAtMs) {
+            const ts = Math.floor(stats.lastClaimAtMs / 1000);
+            lines.push(`**Last Daily Claim:** <t:${ts}:f> • <t:${ts}:R>`);
+          }
+
+          if (!lines.length) {
+            lines.push(
+              'Belum ada data statistik yang tercatat untuk akun kamu di API.'
+            );
+          }
+
+          embed.setDescription(lines.join('\n'));
 
           await interaction.editReply({ embeds: [embed] });
         } catch (err) {
           console.error('control_get_stats error:', err);
           await interaction.editReply({
             content:
-              'Terjadi kesalahan saat mengambil stats dari API. Coba lagi atau hubungi admin.',
+              'Terjadi kesalahan saat mengambil statistik dari API. Coba lagi beberapa saat lagi.',
           });
         }
+
         return;
       }
 
       if (customId === 'store_create_ticket') {
         if (!interaction.guild) {
           await interaction.reply({
-            content: 'Perintah ini hanya dapat digunakan di server.',
+            content:
+              'Perintah ini hanya dapat digunakan di dalam server (bukan DM).',
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -2901,627 +2951,405 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.deferReply({ ephemeral: true });
 
-        const guild = interaction.guild;
-        const cleanName =
-          interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '') ||
-          'user';
-        const shortId = Math.floor(Math.random() * 9000) + 1000;
-        const channelName = `ticket-${cleanName}-${shortId}`;
+        try {
+          const guild = interaction.guild;
 
-        const everyone = guild.roles.everyone;
-
-        const permissionOverwrites = [
-          {
-            id: everyone.id,
-            deny: [PermissionsBitField.Flags.ViewChannel],
-          },
-          {
-            id: interaction.user.id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.AttachFiles,
-            ],
-          },
-          {
-            id: guild.members.me.id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ManageChannels,
-            ],
-          },
-        ];
-
-        for (const ownerIdRaw of OWNER_IDS) {
-          const id = String(ownerIdRaw).trim();
-          if (!id || id === interaction.user.id) continue;
-
-          const ownerMember = guild.members.cache.get(id);
-          const ownerRole = guild.roles.cache.get(id);
-
-          if (!ownerMember && !ownerRole) continue;
-
-          permissionOverwrites.push({
-            id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ManageChannels,
-            ],
-          });
-        }
-
-        const channel = await guild.channels.create({
-          name: channelName.slice(0, 90),
-          type: ChannelType.GuildText,
-          parent: TICKET_CATEGORY_ID || undefined,
-          topic: `Ticket order by ${interaction.user.tag} | OwnerID:${interaction.user.id}`,
-          permissionOverwrites,
-        });
-
-        ticketOwners.set(channel.id, interaction.user.id);
-
-        await interaction.editReply({
-          content: `Ticket kamu sudah dibuat: ${channel}`,
-        });
-
-        // PERUBAHAN: setelah ticket dibuat, kirim panel PILIH METODE PEMBAYARAN
-        await sendTicketPaymentMethodIntro(channel, interaction.user);
-
-        const logEmbed = new EmbedBuilder()
-          .setTitle('🎫 Ticket Baru Dibuat')
-          .addFields(
-            {
-              name: 'User',
-              value: `${interaction.user} (${interaction.user.id})`,
-            },
-            { name: 'Channel', value: `${channel}` }
-          )
-          .setTimestamp()
-          .setColor(0x5865f2);
-
-        await logOrder(guild, logEmbed);
-        return;
-      }
-
-      if (customId === 'ticket_cancel') {
-        const ownerId = getTicketOwnerId(interaction.channel);
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content: 'Hanya pembuat ticket yang bisa membatalkan order ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        await interaction.reply({
-          content: 'Ticket akan dihapus dalam 3 detik...',
-          flags: MessageFlags.Ephemeral,
-        });
-
-        setTimeout(() => {
-          interaction.channel
-            .delete('Ticket dibatalkan oleh user')
-            .catch(() => {});
-        }, 3000);
-        return;
-      }
-
-      if (customId === 'ticket_confirm') {
-        if (!interaction.guild) {
-          await interaction.reply({
-            content: 'Perintah ini hanya dapat digunakan di dalam server.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const member = await interaction.guild.members.fetch(
-          interaction.user.id
-        );
-        if (
-          !member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya admin / owner yang dapat mengkonfirmasi order ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const guild = interaction.guild;
-        const ownerId = getTicketOwnerId(interaction.channel);
-        const order = ticketOrders.get(interaction.channel.id);
-
-        if (!order) {
-          await interaction.reply({
-            content:
-              'Belum ada paket order yang dipilih di ticket ini. Minta user memilih paket dahulu dari dropdown yang tersedia.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        let paidLabel = 'Unknown';
-        let nominal = 0;
-        let expiresMs = null;
-        let paymentNote = null;
-
-        if (order && order.type === 'KEY_MONTH') {
-          paidLabel = 'Key Sebulan';
-          nominal = priceKeyMonth;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
-        } else if (order && order.type === 'KEY_LIFE') {
-          paidLabel = 'Key Lifetime';
-          nominal = priceKeyLifetime;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 365 * 24 * 60 * 60 * 1000;
-        } else if (order && order.type === 'INDO_VIP') {
-          paidLabel = 'Indo Hangout Premium';
-          nominal = priceIndoHangout;
-        } else if (order && order.type === 'BOOST_1M') {
-          paidLabel = 'Key 1 Month (Server Booster)';
-          nominal = 0;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
-          paymentNote = '3x Server Booster (30 days)';
-        } else if (order && order.type === 'BOOST_3M') {
-          paidLabel = 'Key 3 Months (Server Booster)';
-          nominal = 0;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 90 * 24 * 60 * 60 * 1000;
-          paymentNote = '5x Server Booster (90 days)';
-        }
-
-        let expiredText = '-';
-        if (expiresMs) {
-          const expTs = Math.floor(expiresMs / 1000);
-          expiredText = `<t:${expTs}:F>`;
-        } else if (paidLabel === 'Indo Hangout Premium') {
-          expiredText = 'Permanent';
-        }
-
-        const ownerMention = ownerId
-          ? `<@${ownerId}>`
-          : `${interaction.user}`;
-
-        let nominalText;
-        if (paymentNote) {
-          nominalText = paymentNote;
-        } else {
-          nominalText =
-            nominal && nominal > 0
-              ? `Rp. ${formatRupiah(nominal)}`
-              : 'Rp. -';
-        }
-
-        const content =
-          '**✅️ Sukses Order Key 🔑**\n' +
-          `User: ${ownerMention}\n` +
-          `Paid Key: ${paidLabel}\n` +
-          `Expired: ${expiredText}\n` +
-          `Nominal: ${nominalText}`;
-
-        if (!LOGPAID_CHANNEL_ID) {
-          await interaction.reply({
-            content:
-              'LOGPAID_CHANNEL_ID belum dikonfigurasi di .env, tidak bisa mengirim log paid order.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const logChannel = guild.channels.cache.get(LOGPAID_CHANNEL_ID);
-        if (!logChannel) {
-          await interaction.reply({
-            content:
-              'Channel LOGPAID_CHANNEL_ID tidak ditemukan di server. Cek kembali konfigurasi .env.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        await logPaidOrder(guild, { content });
-
-        await interaction.reply({
-          content: '✅ Order berhasil dikonfirmasi dan log telah dikirim.',
-          flags: MessageFlags.Ephemeral,
-        });
-
-        return;
-      }
-
-      if (customId === 'ticket_close') {
-        const member = await interaction.guild.members.fetch(
-          interaction.user.id
-        );
-        if (
-          !member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya admin / owner yang dapat menutup ticket ini (Close Ticket).',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        await interaction.reply({
-          content: 'Ticket akan ditutup (channel dihapus) dalam 3 detik...',
-          flags: MessageFlags.Ephemeral,
-        });
-
-        setTimeout(() => {
-          interaction.channel
-            .delete('Ticket closed by staff')
-            .catch(() => {});
-        }, 3000);
-        return;
-      }
-
-      if (customId === 'roblox_reinput' || customId === 'roblox_wrong') {
-        const ownerId = getTicketOwnerId(interaction.channel);
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya pembuat ticket yang dapat menginput ulang username Roblox.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const modal = new ModalBuilder()
-          .setCustomId('modal_roblox_username')
-          .setTitle('Masukkan Username Roblox');
-
-        const input = new TextInputBuilder()
-          .setCustomId('field_roblox_username')
-          .setLabel('Username Roblox')
-          .setPlaceholder('Contoh: BloxGuy123')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true);
-
-        const row = new ActionRowBuilder().addComponents(input);
-        modal.addComponents(row);
-        await interaction.showModal(modal);
-        return;
-      }
-
-      if (customId.startsWith('roblox_confirm_')) {
-        const ownerId = getTicketOwnerId(interaction.channel);
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya pembuat ticket yang dapat mengkonfirmasi username ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const embed = interaction.message.embeds[0];
-        let usernameText = '-';
-        let userIdText = '-';
-
-        if (embed && Array.isArray(embed.fields)) {
-          for (const f of embed.fields) {
-            if (f.name === 'Username') usernameText = f.value;
-            if (f.name === 'User ID') userIdText = f.value;
-          }
-        }
-
-        const rowOld = interaction.message.components[0];
-        const btn1 = ButtonBuilder.from(rowOld.components[0]).setDisabled(true);
-        const btn2 = ButtonBuilder.from(rowOld.components[1]).setDisabled(true);
-        const newRow = new ActionRowBuilder().addComponents(btn1, btn2);
-
-        await interaction.update({ components: [newRow] });
-
-        const harga = priceIndoHangout;
-
-        const instruksi = new EmbedBuilder()
-          .setTitle('✨ Instruksi Pembayaran')
-          .setDescription('Scan QRIS di bawah untuk membayar')
-          .addFields(
-            {
-              name: 'Detail Pesanan',
-              value:
-                `Paket   : Indo Hangout Premium\n` +
-                `Username: ${usernameText}\n` +
-                `User ID : ${userIdText}\n` +
-                `Nominal : Rp ${formatRupiah(harga)}`,
-            },
-            {
-              name: 'Langkah Pembayaran',
-              value:
-                '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
-                '2. Bayar sesuai nominal.\n' +
-                '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                '4. Tunggu konfirmasi admin (maksimal 10 menit).',
-            },
-            {
-              name: 'Jam Operasional',
-              value: '08:00 - 23:00 WIB',
+          const existing = Array.from(ticketOwners.entries()).find(
+            ([, uid]) => uid === interaction.user.id
+          );
+          if (existing) {
+            const existingChannel = guild.channels.cache.get(existing[0]);
+            if (existingChannel) {
+              await interaction.editReply({
+                content: `Kamu sudah punya ticket: ${existingChannel}. Gunakan ticket tersebut terlebih dahulu.`,
+              });
+              return;
+            } else {
+              ticketOwners.delete(existing[0]);
             }
-          )
-          .setColor(0xfee75c);
+          }
 
-        if (QRIS_IMAGE_URL) {
-          instruksi.setImage(QRIS_IMAGE_URL);
+          const baseName = interaction.user.username
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .slice(0, 8);
+          const randomCode = crypto.randomBytes(2).toString('hex');
+          const channelName = `ticket-${baseName || 'user'}-${randomCode}`;
+
+          const everyoneRole = guild.roles.everyone;
+
+          const permissionOverwrites = [
+            {
+              id: everyoneRole.id,
+              deny: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+              ],
+            },
+            {
+              id: interaction.user.id,
+              allow: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+                PermissionsBitField.Flags.ReadMessageHistory,
+                PermissionsBitField.Flags.AttachFiles,
+              ],
+            },
+          ];
+
+          for (const ownerId of OWNER_IDS) {
+            const ownerMember = guild.members.cache.get(ownerId);
+            if (!ownerMember) continue;
+            permissionOverwrites.push({
+              id: ownerMember.id,
+              allow: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+                PermissionsBitField.Flags.ReadMessageHistory,
+                PermissionsBitField.Flags.ManageMessages,
+              ],
+            });
+          }
+
+          const channelOptions = {
+            name: channelName,
+            type: ChannelType.GuildText,
+            topic: `Ticket order ExHub | OwnerID:${interaction.user.id}`,
+            permissionOverwrites,
+          };
+
+          if (TICKET_CATEGORY_ID) {
+            const cat = guild.channels.cache.get(TICKET_CATEGORY_ID);
+            if (cat && cat.type === ChannelType.GuildCategory) {
+              channelOptions.parent = cat.id;
+            }
+          }
+
+          const ticketChannel = await guild.channels.create(channelOptions);
+
+          ticketOwners.set(ticketChannel.id, interaction.user.id);
+
+          await interaction.editReply({
+            content: `✅ Ticket berhasil dibuat: ${ticketChannel}`,
+          });
+
+          await sendTicketPaymentMethodIntro(ticketChannel, interaction.user);
+        } catch (err) {
+          console.error('store_create_ticket error:', err);
+          await interaction.editReply({
+            content:
+              'Terjadi kesalahan saat membuat ticket. Pastikan bot punya izin **Manage Channels**.',
+          });
         }
 
-        await interaction.followUp({ embeds: [instruksi] });
-
-        const logEmb = new EmbedBuilder()
-          .setTitle('🧾 Order Indo Hangout Premium')
-          .addFields(
-            {
-              name: 'Discord User',
-              value: `${interaction.user} (${interaction.user.id})`,
-            },
-            { name: 'Roblox Username', value: usernameText },
-            { name: 'Roblox User ID', value: userIdText },
-            { name: 'Nominal', value: `Rp ${formatRupiah(harga)}` },
-            { name: 'Channel Ticket', value: `${interaction.channel}` }
-          )
-          .setTimestamp()
-          .setColor(0x57f287);
-
-        await logOrder(interaction.guild, logEmb);
         return;
+      }
+
+      if (
+        customId === 'ticket_cancel' ||
+        customId === 'ticket_confirm' ||
+        customId === 'ticket_close'
+      ) {
+        if (!interaction.guild || !interaction.channel) {
+          await interaction.reply({
+            content: 'Aksi ticket hanya bisa digunakan di dalam server.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const guild = interaction.guild;
+        const channel = interaction.channel;
+        const ownerId = getTicketOwnerId(channel);
+
+        const isTicketOwner = ownerId === interaction.user.id;
+        const isStaff =
+          interaction.memberPermissions?.has(
+            PermissionsBitField.Flags.ManageChannels
+          ) || isOwner(interaction.user.id);
+
+        if (!isTicketOwner && !isStaff) {
+          await interaction.reply({
+            content:
+              'Kamu tidak punya izin untuk mengelola ticket ini. Hanya owner ticket atau staff yang bisa.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        if (customId === 'ticket_cancel') {
+          ticketOrders.delete(channel.id);
+
+          await interaction.reply({
+            content: '❌ Order di ticket ini dibatalkan.',
+            flags: MessageFlags.Ephemeral,
+          });
+
+          await channel.send({
+            content: `Order di ticket ini telah dibatalkan oleh <@${interaction.user.id}>.`,
+          });
+
+          return;
+        }
+
+        if (customId === 'ticket_confirm') {
+          const order = ticketOrders.get(channel.id);
+          if (!order) {
+            await interaction.reply({
+              content:
+                'Belum ada paket yang dipilih. Silakan pilih paket terlebih dahulu dari menu dropdown.',
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          const userMention = ownerId ? `<@${ownerId}>` : 'user';
+          const methodLabel =
+            order.paymentMethod === 'BOOST' ? 'Server Booster' : 'QRIS / Rupiah';
+
+          const descLines = [
+            `**Order dikunci oleh:** <@${interaction.user.id}>`,
+            `**Pemilik Ticket:** ${userMention}`,
+            `**Metode Pembayaran:** ${methodLabel}`,
+            `**Paket:** ${order.label || order.type}`,
+          ];
+
+          if (order.price) {
+            descLines.push(`**Harga:** Rp ${formatRupiah(order.price)}`);
+          }
+
+          if (order.extraInfo) {
+            descLines.push(order.extraInfo);
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle('✅ Order Ticket Dikonfirmasi')
+            .setDescription(descLines.join('\n'))
+            .setColor(0x57f287)
+            .setTimestamp(new Date());
+
+          await interaction.reply({
+            content: 'Order berhasil dikonfirmasi.',
+            flags: MessageFlags.Ephemeral,
+          });
+
+          await channel.send({
+            content: '<@&' + (PAID_ROLE_ID || OWNER_IDS[0] || '') + '>',
+            embeds: [embed],
+          });
+
+          await logPaidOrder(guild, {
+            content: `Order paid key dari channel ${channel} telah dikonfirmasi.`,
+            embeds: [embed],
+          });
+
+          return;
+        }
+
+        if (customId === 'ticket_close') {
+          await interaction.deferReply({ ephemeral: true });
+
+          try {
+            const newName = channel.name.startsWith('closed-')
+              ? channel.name
+              : `closed-${channel.name}`.slice(0, 100);
+
+            await channel.setName(newName).catch(() => {});
+
+            const ticketOwnerId = ownerId;
+            if (ticketOwnerId) {
+              await channel.permissionOverwrites.edit(ticketOwnerId, {
+                ViewChannel: false,
+                SendMessages: false,
+              });
+            }
+
+            ticketOwners.delete(channel.id);
+            ticketOrders.delete(channel.id);
+
+            await interaction.editReply({
+              content:
+                'Ticket berhasil ditutup. Channel akan disembunyikan dari pemilik ticket.',
+            });
+
+            await channel.send({
+              content: '🔒 Ticket ini telah ditutup. Terima kasih.',
+            });
+          } catch (err) {
+            console.error('ticket_close error:', err);
+            await interaction.editReply({
+              content:
+                'Gagal menutup ticket. Pastikan bot memiliki izin **Manage Channels** dan **Manage Roles**.',
+            });
+          }
+
+          return;
+        }
       }
 
       return;
     }
 
+    // ====================== STRING SELECT MENUS ======================
     if (interaction.isStringSelectMenu()) {
-      const { customId } = interaction;
+      const { customId, values } = interaction;
+      const value = values && values[0];
 
-      // PILIH METODE PEMBAYARAN (IDR / BOOST)
+      if (
+        !customId ||
+        !value ||
+        !interaction.guild ||
+        !interaction.channel
+      ) {
+        await interaction.reply({
+          content: 'Interaksi tidak valid.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       if (customId === 'ticket_select_payment_method') {
-        const [value] = interaction.values;
-        const ownerId = getTicketOwnerId(interaction.channel);
-
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
+        if (value === 'PAY_IDR') {
+          await interaction.deferReply({ ephemeral: true });
+          await sendTicketIntroMessage(interaction.channel, interaction.user);
+          await interaction.editReply({
             content:
-              'Hanya pembuat ticket yang dapat memilih metode pembayaran di ticket ini.',
-            flags: MessageFlags.Ephemeral,
+              'Metode pembayaran **Rupiah (QRIS)** dipilih. Silakan lanjutkan dengan memilih paket.',
           });
+
+          ticketOrders.set(interaction.channel.id, {
+            paymentMethod: 'IDR',
+          });
+
           return;
         }
 
-        if (value === 'PAY_IDR') {
-          await sendTicketIntroMessage(interaction.channel, interaction.user);
-          await interaction.reply({
-            content:
-              '✅ Metode pembayaran **Rupiah (QRIS)** dipilih. Silahkan pilih paket di panel baru.',
-            flags: MessageFlags.Ephemeral,
-          });
-        } else if (value === 'PAY_BOOST') {
+        if (value === 'PAY_BOOST') {
+          await interaction.deferReply({ ephemeral: true });
           await sendTicketIntroMessage2(interaction.channel, interaction.user);
-          await interaction.reply({
+          await interaction.editReply({
             content:
-              '✅ Payment method **Server Booster** selected. Please choose your package in the new panel.',
-            flags: MessageFlags.Ephemeral,
+              'Metode pembayaran **Server Booster** dipilih. Silakan lanjutkan dengan memilih paket booster.',
           });
-        }
 
-        return;
+          ticketOrders.set(interaction.channel.id, {
+            paymentMethod: 'BOOST',
+          });
+
+          return;
+        }
       }
 
       if (customId === 'ticket_select_package') {
-        const [value] = interaction.values;
-        const ownerId = getTicketOwnerId(interaction.channel);
+        await interaction.deferReply({ ephemeral: true });
 
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
+        const existing = ticketOrders.get(interaction.channel.id) || {};
+        const method = existing.paymentMethod || 'IDR';
+
+        let label = '';
+        let price = 0;
+        let type = value;
 
         if (value === 'KEY_MONTH') {
-          const harga = priceKeyMonth;
-          ticketOrders.set(interaction.channel.id, {
-            type: 'KEY_MONTH',
-            price: harga,
-            timestamp: Date.now(),
-          });
-
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Instruksi Pembayaran — Key Sebulan')
-            .setDescription('Scan QRIS di bawah untuk membayar')
-            .addFields(
-              {
-                name: 'Detail Pesanan',
-                value:
-                  `Paket   : Key Sebulan\n` +
-                  `Nominal : Rp ${formatRupiah(harga)}`,
-              },
-              {
-                name: 'Langkah Pembayaran',
-                value:
-                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
-                  '2. Bayar sesuai nominal.\n' +
-                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
-              },
-              {
-                name: 'Jam Operasional',
-                value: '08:00 - 23:00 WIB',
-              }
-            )
-            .setColor(0xfee75c);
-
-          if (QRIS_IMAGE_URL) {
-            instruksi.setImage(QRIS_IMAGE_URL);
-          }
-
-          await interaction.reply({
-            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
-            embeds: [instruksi],
-          });
+          label = 'Key Sebulan (30 hari • 2 Script Premium)';
+          price = priceKeyMonth;
         } else if (value === 'KEY_LIFE') {
-          const harga = priceKeyLifetime;
-          ticketOrders.set(interaction.channel.id, {
-            type: 'KEY_LIFE',
-            price: harga,
-            timestamp: Date.now(),
-          });
-
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Instruksi Pembayaran — Key Lifetime')
-            .setDescription('Scan QRIS di bawah untuk membayar')
-            .addFields(
-              {
-                name: 'Detail Pesanan',
-                value:
-                  `Paket   : Key Lifetime\n` +
-                  `Nominal : Rp ${formatRupiah(harga)}`,
-              },
-              {
-                name: 'Langkah Pembayaran',
-                value:
-                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
-                  '2. Bayar sesuai nominal.\n' +
-                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
-              },
-              {
-                name: 'Jam Operasional',
-                value: '08:00 - 23:00 WIB',
-              }
-            )
-            .setColor(0xfee75c);
-
-          if (QRIS_IMAGE_URL) {
-            instruksi.setImage(QRIS_IMAGE_URL);
-          }
-
-          await interaction.reply({
-            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
-            embeds: [instruksi],
-          });
+          label = 'Key Lifetime (1 tahun • 2 Script Premium)';
+          price = priceKeyLifetime;
+        } else if (value === 'EMOTE_3M') {
+          label = 'Emotes Key 3 Bulan (90 hari)';
+          price = priceKey3Month;
+        } else if (value === 'EMOTE_6M') {
+          label = 'Emotes Key 6 Bulan (180 hari)';
+          price = priceKey6Month;
         } else if (value === 'INDO_VIP') {
-          ticketOrders.set(interaction.channel.id, {
-            type: 'INDO_VIP',
-            price: priceIndoHangout,
-            timestamp: Date.now(),
-          });
-
-          const modal = new ModalBuilder()
-            .setCustomId('modal_roblox_username')
-            .setTitle('Masukkan Username Roblox');
-
-          const input = new TextInputBuilder()
-            .setCustomId('field_roblox_username')
-            .setLabel('Username Roblox')
-            .setPlaceholder('Contoh: BloxGuy123')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-          const row = new ActionRowBuilder().addComponents(input);
-          modal.addComponents(row);
-          await interaction.showModal(modal);
+          label = 'Indo Hangout Premium (1 Username • Permanent)';
+          price = priceIndoHangout;
         }
+
+        const summaryLines = [
+          `**Metode Pembayaran:** ${method === 'BOOST' ? 'Server Booster' : 'Rupiah (QRIS)'}`,
+          `**Paket:** ${label || type}`,
+        ];
+
+        if (price > 0) {
+          summaryLines.push(`**Harga:** Rp ${formatRupiah(price)}`);
+        }
+
+        summaryLines.push(
+          '',
+          'Silakan lakukan pembayaran sesuai metode yang dipilih lalu upload bukti pembayaran (screenshot QRIS) di ticket ini.',
+          'Setelah itu, tekan tombol **Confirm Order** agar staff memproses pesanan kamu.'
+        );
+
+        if (QRIS_IMAGE_URL && method === 'IDR') {
+          const embed = new EmbedBuilder()
+            .setTitle('📷 QRIS Pembayaran')
+            .setDescription(summaryLines.join('\n'))
+            .setColor(0xfee75c)
+            .setImage(QRIS_IMAGE_URL);
+
+          await interaction.editReply({ embeds: [embed] });
+        } else {
+          await interaction.editReply({
+            content: summaryLines.join('\n'),
+          });
+        }
+
+        ticketOrders.set(interaction.channel.id, {
+          ...existing,
+          type,
+          label,
+          price,
+          createdAt: Date.now(),
+        });
 
         return;
       }
 
-      // PILIH PAKET SERVER BOOSTER
       if (customId === 'ticket_select_boost_package') {
-        const [value] = interaction.values;
-        const ownerId = getTicketOwnerId(interaction.channel);
+        await interaction.deferReply({ ephemeral: true });
 
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
+        const existing = ticketOrders.get(interaction.channel.id) || {};
+        const method = 'BOOST';
+
+        let label = '';
+        let extraInfo = '';
+        let type = value;
 
         if (value === 'BOOST_1M') {
-          ticketOrders.set(interaction.channel.id, {
-            type: 'BOOST_1M',
-            price: 0,
-            timestamp: Date.now(),
-          });
-
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Payment Instructions — 1 Month Key (Server Booster)')
-            .setDescription(
-              'Please pay using **Discord Nitro Server Boost**.\n\n' +
-                '**Package Details**\n' +
-                '• Key Type   : 1 Month Paid Key\n' +
-                '• Requirement: 3x Server Booster on this server\n' +
-                '• Access     : 30 days from activation\n\n' +
-                '**Steps**\n' +
-                '1. Boost this server **3 times**.\n' +
-                '2. Take a screenshot of your active boosts.\n' +
-                '3. Send the screenshot here.\n' +
-                '4. Wait for staff to verify and send your key.'
-            )
-            .setColor(0x5865f2);
-
-          await interaction.reply({
-            content: `✅ Please pay with **3x Server Booster** and send screenshots here ${interaction.user}`,
-            embeds: [instruksi],
-          });
+          label = 'Key 1 Month (30 days)';
+          extraInfo =
+            'Syarat: **3x Server Booster** aktif di server ini selama minimal 30 hari.';
         } else if (value === 'BOOST_3M') {
-          ticketOrders.set(interaction.channel.id, {
-            type: 'BOOST_3M',
-            price: 0,
-            timestamp: Date.now(),
-          });
-
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Payment Instructions — 3 Months Key (Server Booster)')
-            .setDescription(
-              'Please pay using **Discord Nitro Server Boost**.\n\n' +
-                '**Package Details**\n' +
-                '• Key Type   : 3 Months Paid Key\n' +
-                '• Requirement: 5x Server Booster on this server\n' +
-                '• Access     : 90 days from activation\n\n' +
-                '**Steps**\n' +
-                '1. Boost this server **5 times**.\n' +
-                '2. Take a screenshot of your active boosts.\n' +
-                '3. Send the screenshot here.\n' +
-                '4. Wait for staff to verify and send your key.'
-            )
-            .setColor(0x5865f2);
-
-          await interaction.reply({
-            content: `✅ Please pay with **5x Server Booster** and send screenshots here ${interaction.user}`,
-            embeds: [instruksi],
-          });
+          label = 'Key 3 Months (90 days)';
+          extraInfo =
+            'Syarat: **5x Server Booster** aktif di server ini selama minimal 90 hari.';
         }
+
+        const lines = [
+          '**Server Booster Order Summary**',
+          '',
+          `**Paket:** ${label || type}`,
+          extraInfo || '',
+          '',
+          'Silakan lakukan **Server Boost** sesuai syarat di atas.',
+          'Setelah boost aktif, kirimkan screenshot bukti boosts di ticket ini.',
+          'Jika sudah lengkap, tekan tombol **Confirm Order** agar staff memverifikasi dan mengirim key.',
+        ];
+
+        await interaction.editReply({
+          content: lines.join('\n'),
+        });
+
+        ticketOrders.set(interaction.channel.id, {
+          ...existing,
+          paymentMethod: method,
+          type,
+          label,
+          extraInfo,
+          createdAt: Date.now(),
+        });
 
         return;
       }
@@ -3529,300 +3357,64 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ====================== MODALS ======================
     if (interaction.isModalSubmit()) {
       const { customId } = interaction;
 
-      if (customId === 'modal_roblox_username') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const ownerId = getTicketOwnerId(interaction.channel);
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.editReply({
-            content:
-              'Hanya pembuat ticket yang dapat menginput username Roblox.',
-          });
-          return;
-        }
-
-        const username = interaction.fields
-          .getTextInputValue('field_roblox_username')
-          .trim();
-
-        if (!username) {
-          await interaction.editReply({
-            content: 'Username tidak boleh kosong.',
-          });
-          return;
-        }
-
-        try {
-          const roblox = await lookupRobloxUser(username);
-
-          if (!roblox) {
-            await interaction.editReply({
-              content:
-                '❌ Username tidak ditemukan. Lihat panel di bawah untuk panduan dan input ulang.',
-            });
-
-            const embed = new EmbedBuilder()
-              .setTitle('✨ Username Tidak Ditemukan')
-              .setDescription(
-                `Username \`${username}\` tidak ditemukan di Roblox.`
-              )
-              .addFields(
-                {
-                  name: 'Kemungkinan Penyebab',
-                  value:
-                    '• Username salah ketik\n' +
-                    '• Menggunakan Display Name (bukan Username)\n' +
-                    '• Akun Roblox tidak ada\n' +
-                    '• Ada spasi atau karakter khusus',
-                },
-                {
-                  name: 'Cara Cek Username Roblox',
-                  value:
-                    '1. Buka profil Roblox Anda.\n' +
-                    '2. Username ada di `@username` (bukan Display Name).\n' +
-                    '3. Contoh: Display `John` → Username `@john123`.',
-                }
-              )
-              .setColor(0xed4245);
-
-            const btn = new ButtonBuilder()
-              .setCustomId('roblox_reinput')
-              .setLabel('Input Username Lagi')
-              .setEmoji('🔁')
-              .setStyle(ButtonStyle.Primary);
-
-            const row = new ActionRowBuilder().addComponents(btn);
-
-            await interaction.channel.send({
-              embeds: [embed],
-              components: [row],
-            });
-          } else {
-            await interaction.editReply({
-              content:
-                '✅ Username terverifikasi! Lihat panel di bawah untuk konfirmasi.',
-            });
-
-            const embed = new EmbedBuilder()
-              .setTitle('✨ Username Ditemukan')
-              .setDescription(`${roblox.name} (@${username})`)
-              .addFields(
-                { name: 'Username', value: roblox.name, inline: true },
-                {
-                  name: 'Display Name',
-                  value: roblox.displayName || '-',
-                  inline: true,
-                },
-                {
-                  name: 'User ID',
-                  value: String(roblox.id),
-                  inline: true,
-                }
-              )
-              .setThumbnail(robloxAvatarUrl(roblox.id))
-              .setColor(0x57f287);
-
-            const btnYes = new ButtonBuilder()
-              .setCustomId(`roblox_confirm_${roblox.id}`)
-              .setLabel('Ya, Benar!')
-              .setEmoji('✅')
-              .setStyle(ButtonStyle.Success);
-
-            const btnNo = new ButtonBuilder()
-              .setCustomId('roblox_wrong')
-              .setLabel('Salah, Input Ulang')
-              .setEmoji('❌')
-              .setStyle(ButtonStyle.Danger);
-
-            const row = new ActionRowBuilder().addComponents(btnYes, btnNo);
-
-            await interaction.channel.send({
-              embeds: [embed],
-              components: [row],
-            });
-          }
-        } catch (err) {
-          console.error('lookupRobloxUser error:', err);
-          await interaction.editReply({
-            content:
-              'Terjadi kesalahan saat menghubungi API Roblox. Coba lagi beberapa saat lagi.',
-          });
-        }
-
-        return;
-      }
-
       if (customId === 'modal_redeem_key_month') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const rawKey = interaction.fields
+        const key = interaction.fields
           .getTextInputValue('field_key_month')
           .trim();
-        const key = rawKey.toUpperCase();
 
-        if (!key) {
-          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
-          return;
-        }
-
+        await interaction.deferReply({ ephemeral: true });
         await redeemPaidKeyFlow(interaction, key, 'month');
         return;
       }
 
       if (customId === 'modal_redeem_key_life') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const rawKey = interaction.fields
+        const key = interaction.fields
           .getTextInputValue('field_key_life')
           .trim();
-        const key = rawKey.toUpperCase();
 
-        if (!key) {
-          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
-          return;
-        }
-
+        await interaction.deferReply({ ephemeral: true });
         await redeemPaidKeyFlow(interaction, key, 'lifetime');
         return;
       }
 
       if (customId === 'modal_redeem_key_any') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const rawKey = interaction.fields
+        const key = interaction.fields
           .getTextInputValue('field_key_any')
           .trim();
-        const key = rawKey.toUpperCase();
 
-        if (!key) {
-          await interaction.editReply({ content: 'Key tidak boleh kosong.' });
-          return;
-        }
-
+        await interaction.deferReply({ ephemeral: true });
         await redeemPaidKeyFlow(interaction, key, 'any');
         return;
       }
 
       if (customId === 'modal_reset_hwid') {
-        await interaction.deferReply({ ephemeral: true });
-
-        const rawKey = interaction.fields
+        const key = interaction.fields
           .getTextInputValue('field_reset_hwid_key')
           .trim();
-        const key = rawKey.toUpperCase();
 
-        if (!key) {
-          await interaction.editReply({
-            content: 'Key tidak boleh kosong.',
-          });
-          return;
-        }
-
-        if (!RESET_HWID_API_URL) {
-          await interaction.editReply({
-            content:
-              'Fitur Reset HWID belum dikonfigurasi. Minta admin mengisi `RESET_HWID_API_URL` di `.env` bot.',
-          });
-          return;
-        }
+        await interaction.deferReply({ ephemeral: true });
 
         try {
           const result = await resetHwidOnAPI(key, interaction.user);
 
-          let ok = true;
-          let detail = '';
-          if (result && typeof result === 'object') {
-            if (typeof result.ok === 'boolean') ok = result.ok;
-            detail =
-              result.message ||
-              result.reason ||
-              result.error ||
-              '';
-          }
+          const successMsg =
+            result && (result.message || result.status || result.ok)
+              ? String(result.message || result.status || 'Reset HWID berhasil.')
+              : 'Reset HWID berhasil diproses.';
 
-          if (ok) {
-            let msg =
-              `✅ Reset HWID berhasil untuk key \`${key}\`.\n` +
-              'Silakan buka kembali ExHub Panel di Roblox dan login dari device baru kamu.';
-            if (detail) {
-              msg += `\n\nDetail: ${detail}`;
-            }
-            await interaction.editReply({ content: msg });
-
-            if (interaction.guild) {
-              const log = new EmbedBuilder()
-                .setTitle('♻️ HWID Reset Success')
-                .addFields(
-                  {
-                    name: 'Discord User',
-                    value: `${interaction.user} (${interaction.user.id})`,
-                  },
-                  { name: 'Key', value: `\`${key}\`` }
-                )
-                .setTimestamp()
-                .setColor(0x57f287);
-              await logOrder(interaction.guild, log);
-            }
-          } else {
-            let msg =
-              '❌ Reset HWID gagal. Silakan cek kembali key kamu atau hubungi admin.';
-            if (detail) {
-              msg += `\n\nDetail: ${detail}`;
-            }
-            await interaction.editReply({ content: msg });
-
-            if (interaction.guild) {
-              const log = new EmbedBuilder()
-                .setTitle('⚠️ HWID Reset Failed')
-                .addFields(
-                  {
-                    name: 'Discord User',
-                    value: `${interaction.user} (${interaction.user.id})`,
-                  },
-                  { name: 'Key', value: `\`${key}\`` },
-                  ...(detail
-                    ? [{ name: 'Detail', value: detail.slice(0, 1000) }]
-                    : [])
-                )
-                .setTimestamp()
-                .setColor(0xed4245);
-              await logOrder(interaction.guild, log);
-            }
-          }
+          await interaction.editReply({
+            content: `✅ ${successMsg}`,
+          });
         } catch (err) {
           console.error('resetHwidOnAPI error:', err);
-          const msg =
-            'Terjadi kesalahan saat menghubungi API reset HWID. Coba lagi beberapa saat lagi atau hubungi admin.';
           await interaction.editReply({
-            content: `${msg}\n\nDetail teknis: \`${String(
-              err.message || err
-            ).slice(0, 180)}\``,
+            content:
+              'Terjadi kesalahan saat memproses reset HWID. Pastikan key benar dan coba lagi.',
           });
-
-          if (interaction.guild) {
-            const log = new EmbedBuilder()
-              .setTitle('⚠️ HWID Reset Error')
-              .addFields(
-                {
-                  name: 'Discord User',
-                  value: `${interaction.user} (${interaction.user.id})`,
-                },
-                { name: 'Key', value: `\`${key}\`` },
-                {
-                  name: 'Error',
-                  value: String(err.message || err).slice(0, 1000),
-                }
-              )
-              .setTimestamp()
-              .setColor(0xed4245);
-            await logOrder(interaction.guild, log);
-          }
         }
 
         return;
@@ -3831,184 +3423,146 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
   } catch (err) {
-    console.error('interactionCreate error:', err);
-    try {
-      if (!interaction.replied && !interaction.deferred) {
+    console.error('interactionCreate handler error:', err);
+    if (!interaction.replied && !interaction.deferred) {
+      try {
         await interaction.reply({
-          content: 'Terjadi error internal saat memproses perintah.',
+          content: 'Terjadi kesalahan internal saat memproses interaksi.',
           flags: MessageFlags.Ephemeral,
         });
+      } catch {
+        // ignore
       }
-    } catch (_) {}
+    }
   }
 });
+
+// ====================== SLASH COMMAND REGISTRATION ======================
+
+if (!DISCORD_TOKEN || !CLIENT_ID) {
+  console.error('DISCORD_TOKEN atau CLIENT_ID belum diisi di .env');
+  process.exit(1);
+}
 
 const commands = [
   new SlashCommandBuilder()
     .setName('sendticketpanel')
-    .setDescription('Kirim panel store / ticket di channel ini'),
+    .setDescription('Kirim panel store ticket order paid key ke channel ini.'),
   new SlashCommandBuilder()
     .setName('sendcontrolpanel')
-    .setDescription('Kirim control panel utama ExHub di channel ini'),
+    .setDescription('Kirim ExHub Control Panel ke channel ini.'),
   new SlashCommandBuilder()
     .setName('setharga_sebulan')
-    .setDescription('Ubah harga paket Key Sebulan')
+    .setDescription('Set harga Key Sebulan (Rupiah).')
     .addIntegerOption((opt) =>
       opt
         .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 15000)')
+        .setDescription('Harga baru dalam Rupiah')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
     .setName('setharga_lifetime')
-    .setDescription('Ubah harga paket Key Lifetime')
+    .setDescription('Set harga Key Lifetime (Rupiah).')
     .addIntegerOption((opt) =>
       opt
         .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 25000)')
+        .setDescription('Harga baru dalam Rupiah')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
     .setName('setharga_indohangout')
-    .setDescription('Ubah harga paket Indo Hangout Premium')
+    .setDescription('Set harga Indo Hangout Premium (Rupiah).')
     .addIntegerOption((opt) =>
       opt
         .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 10000)')
+        .setDescription('Harga baru dalam Rupiah')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
+    .setName('disablepricelifetime')
+    .setDescription(
+      'Toggle tampil / sembunyikan paket Key Lifetime dari dropdown ticket.'
+    ),
+  new SlashCommandBuilder()
+    .setName('disableprice3month')
+    .setDescription(
+      'Toggle tampil / sembunyikan paket Emotes Key 3 Bulan dari dropdown ticket.'
+    ),
+  new SlashCommandBuilder()
+    .setName('disableprice6month')
+    .setDescription(
+      'Toggle tampil / sembunyikan paket Emotes Key 6 Bulan dari dropdown ticket.'
+    ),
+  new SlashCommandBuilder()
     .setName('generatekeysebulan')
-    .setDescription('Generate key sebulan untuk member')
+    .setDescription('Generate Key Sebulan dan kirim ke DM atau reply.')
     .addUserOption((opt) =>
       opt
         .setName('member')
-        .setDescription(
-          'Member yang akan menerima key (jika kosong, tampil di reply)'
-        )
+        .setDescription('Member yang akan dikirimi key (opsional)')
         .setRequired(false)
     ),
   new SlashCommandBuilder()
     .setName('generatekeylifetime')
-    .setDescription('Generate key lifetime untuk member')
+    .setDescription('Generate Key Lifetime dan kirim ke DM atau reply.')
     .addUserOption((opt) =>
       opt
         .setName('member')
-        .setDescription(
-          'Member yang akan menerima key (jika kosong, tampil di reply)'
-        )
+        .setDescription('Member yang akan dikirimi key (opsional)')
         .setRequired(false)
     ),
   new SlashCommandBuilder()
     .setName('redeemkeysebulan')
-    .setDescription('Redeem key sebulan (muncul modal input key)'),
+    .setDescription('Redeem Key Sebulan melalui modal input.'),
   new SlashCommandBuilder()
     .setName('redeemkeylifetime')
-    .setDescription('Redeem key lifetime (muncul modal input key)'),
+    .setDescription('Redeem Key Lifetime melalui modal input.'),
   new SlashCommandBuilder()
     .setName('setwelcomechannel')
-    .setDescription('Set channel untuk welcome message')
+    .setDescription('Set channel welcome.')
     .addChannelOption((opt) =>
       opt
         .setName('channel')
-        .setDescription('Channel tujuan welcome')
+        .setDescription('Channel untuk welcome message')
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(true)
     ),
   new SlashCommandBuilder()
     .setName('setleavechannel')
-    .setDescription('Set channel untuk leave message')
+    .setDescription('Set channel leave.')
     .addChannelOption((opt) =>
       opt
         .setName('channel')
-        .setDescription('Channel tujuan leave')
+        .setDescription('Channel untuk leave message')
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(true)
     ),
   new SlashCommandBuilder()
     .setName('changenamechannel')
-    .setDescription('Ubah nama channel, contoh: #welcome → #✅️ ~ Verify')
+    .setDescription('Ubah nama sebuah channel.')
     .addChannelOption((opt) =>
       opt
         .setName('channel')
-        .setDescription('Channel yang ingin diganti namanya')
+        .setDescription('Channel yang akan di-rename')
         .setRequired(true)
     )
     .addStringOption((opt) =>
       opt
         .setName('name')
-        .setDescription('Nama channel baru, contoh: ✅️ ~ Verify')
+        .setDescription('Nama baru channel')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
     .setName('refreshserverstats')
-    .setDescription(
-      'Refresh nama channel SERVER STATS (All Members, Members, Bots, Boosts)'
-    ),
-  new SlashCommandBuilder()
-    .setName('sendupdatesc')
-    .setDescription('Kirim pengumuman NEW UPDATE SC untuk suatu script')
-    .addStringOption((opt) =>
-      opt
-        .setName('script')
-        .setDescription('Nama script, misal: SPEAR FISHING / GET FISH')
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('status')
-        .setDescription('Status script')
-        .setRequired(true)
-        .addChoices(
-          { name: '[🟢] WORKING / STABLE', value: 'WORKING' },
-          { name: 'ONLINE', value: 'ONLINE' },
-          { name: 'OFFLINE (NOT WORKING)', value: 'OFFLINE' },
-          {
-            name: '[🟡] OUTDATED (BISA DIPAKE)',
-            value: 'OUTDATED (BISA DIPAKE)',
-          },
-          { name: '🛠️ NEED UPDATE', value: 'NEED UPDATE' },
-          { name: '⏳ COMING SOON', value: 'COMING SOON' }
-        )
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('features')
-        .setDescription(
-          'Daftar fitur (pisah dengan koma / ; / newline). Contoh: Auto Farm; Auto Skill; ESP Fish'
-        )
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('changelogs')
-        .setDescription(
-          'Daftar change logs (pisah dengan koma / ; / newline). Contoh: Added Hide Nickname; Added Low Graphic'
-        )
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('nextupdate')
-        .setDescription('Rencana next update (boleh "-" jika belum ada)')
-        .setRequired(false)
-    )
-    .addChannelOption((opt) =>
-      opt
-        .setName('channel')
-        .setDescription(
-          'Channel tujuan pengumuman (kosongkan = pakai UPDATE_CHANNEL_ID atau channel ini)'
-        )
-        .setRequired(false)
-    ),
+    .setDescription('Refresh semua channel server stats.'),
   new SlashCommandBuilder()
     .setName('sendreactionrole')
-    .setDescription(
-      'Kirim pesan reaction role (multi role, multi emoji, multi channel)'
-    )
+    .setDescription('Kirim pesan Reaction Role secara dinamis.')
     .addStringOption((opt) =>
       opt
         .setName('config')
         .setDescription(
-          'Daftar emoji & role (pisah baris / koma). Contoh: "🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #Pesan"'
+          'Config emoji;role. Contoh: 🇮🇩 ; @MemberID , 🇺🇸 ; @MemberEN #teks'
         )
         .setRequired(true)
     )
@@ -4016,64 +3570,86 @@ const commands = [
       opt
         .setName('channels')
         .setDescription(
-          'Channel (mention/ID, pisah spasi/koma). Kosongkan = channel ini.'
+          'Daftar channel (mention / ID) dipisah koma. Kosongkan = channel ini.'
         )
         .setRequired(false)
     )
     .addStringOption((opt) =>
       opt
         .setName('content')
+        .setDescription('Teks pesan di atas embed (opsional).')
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('sendupdatesc')
+    .setDescription('Kirim pengumuman NEW UPDATED script.')
+    .addStringOption((opt) =>
+      opt
+        .setName('script')
+        .setDescription('Nama script')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('status')
+        .setDescription('Status (WORKING / OUTDATED / NOT WORKING / dst.)')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('features')
+        .setDescription('Daftar fitur (pisah baris / koma).')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('changelogs')
+        .setDescription('Daftar change logs (pisah baris / koma).')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('nextupdate')
+        .setDescription('Info rencana next update (opsional).')
+        .setRequired(false)
+    )
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
         .setDescription(
-          'Pesan yang dikirim sebelum daftar emoji (optional, override # di config)'
+          'Channel tujuan pengumuman. Kosongkan = channel ini / .env UPDATE_CHANNEL_ID.'
         )
         .setRequired(false)
     ),
   new SlashCommandBuilder()
     .setName('runtime')
-    .setDescription('Lihat runtime & spesifikasi core VPS untuk bot ini'),
+    .setDescription('Tampilkan info runtime bot dan spesifikasi VPS.'),
   new SlashCommandBuilder()
     .setName('mykey')
-    .setDescription('Lihat semua paid key yang terikat ke akun Discord kamu'),
+    .setDescription('Lihat semua paid key yang terikat ke akun Discord kamu.'),
   new SlashCommandBuilder()
     .setName('checkmykey')
-    .setDescription('Alias dari /mykey untuk cek semua paid key kamu'),
-].map((c) => c.setDMPermission(false).toJSON());
+    .setDescription('Alias dari /mykey untuk cek key akun kamu.'),
+].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
-(async () => {
+async function registerCommands() {
   try {
-    if (!DISCORD_TOKEN || !CLIENT_ID) {
-      console.error(
-        'DISCORD_TOKEN atau CLIENT_ID belum di-set. Cek .env di Railway / VPS.'
-      );
-      return;
-    }
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log('✅ Slash commands registered (global).');
+  } catch (err) {
+    console.error('Failed to register slash commands:', err);
+  }
+}
 
-    console.log('DEBUG CLIENT_ID:', CLIENT_ID);
-    console.log('DEBUG GUILD_ID:', process.env.GUILD_ID);
-    console.log(
-      'DEBUG TOKEN LENGTH:',
-      DISCORD_TOKEN ? DISCORD_TOKEN.length : 'NO TOKEN'
-    );
+// Jalankan registrasi command lalu login bot
+(async () => {
+  await registerCommands();
 
-    console.log('⏳ Registering slash commands...');
-    const guildId = process.env.GUILD_ID;
-
-    if (guildId) {
-      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, guildId), {
-        body: commands,
-      });
-      console.log('✅ Slash commands registered (guild specific).');
-    } else {
-      await rest.put(Routes.applicationCommands(CLIENT_ID), {
-        body: commands,
-      });
-      console.log('✅ Slash commands registered (global).');
-    }
-
+  try {
     await client.login(DISCORD_TOKEN);
   } catch (err) {
-    console.error('Failed to start bot:', err);
+    console.error('Failed to login to Discord:', err);
   }
 })();
