@@ -100,17 +100,15 @@ const REACTION_ROLE_CONFIG_PATH =
   path.join(__dirname, 'configrole.json');
 
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
+let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 40000);
+let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 70000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
-// HARGA EMOTES BARU
-let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 30000);
-let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 50000);
-
-// FLAG ENABLE/DISABLE DROPDOWN PAKET
-let isLifetimeEnabled = true;
-let isEmote3MonthEnabled = true;
-let isEmote6MonthEnabled = true;
+// flag runtime untuk hide/show paket di dropdown ticket
+let disableLifetimeInDropdown = false;
+let disable3MonthInDropdown = false;
+let disable6MonthInDropdown = false;
 
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
@@ -1348,7 +1346,7 @@ async function redeemPaidKeyFlow(interaction, key, mode) {
         'Terima kasih sudah menggunakan ExHub.',
     });
   } catch (err) {
-    console.error(`validatePaidKey (${mode}) error:', err`);
+    console.error(`validatePaidKey (${mode}) error:`, err);
     await interaction.editReply({
       content:
         'Terjadi kesalahan saat menghubungi API validasi key. Coba lagi beberapa saat lagi.',
@@ -1584,6 +1582,7 @@ async function sendStorePanel(channel) {
         '⚡ Fast response from the admins\n\n' +
         'Click the **📩 Create Ticket** button below to start your order :D\n' +
         'We’re ready to help you 24/7 🙂'
+
     )
     .setColor(0x2b2d31);
 
@@ -1735,56 +1734,61 @@ async function sendTicketPaymentMethodIntro(channel, user) {
 
 /**
  * PANEL LAMA: Rupiah (QRIS) – tetap dipakai untuk jalur IDR
+ * Sekarang support:
+ * - Key Sebulan
+ * - Key 3 Bulan (opsional)
+ * - Key 6 Bulan (opsional)
+ * - Key Lifetime (opsional)
+ * - Indo Hangout Premium
+ *
+ * Lifetime / 3 Bulan / 6 Bulan bisa di-hide runtime via command:
+ * /disablepricelifetime, /disableprice3month, /disableprice6month
  */
 async function sendTicketIntroMessage(channel, user) {
-  const lines = [
-    `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
-    '',
-    '**Paket Tersedia**',
-  ];
+  const availableLines = [];
 
-  // Key Sebulan selalu ada
-  lines.push(
+  // list yang muncul di deskripsi tergantung flag disable
+  availableLines.push(
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (Akses 1 Script • 30 hari)`
+    )} (2 Script Premium • 30 hari)`
   );
 
-  // Lifetime hanya jika enabled
-  if (isLifetimeEnabled) {
-    lines.push(
+  if (!disable3MonthInDropdown) {
+    availableLines.push(
+      `📆 Key 3 Bulan – Rp ${formatRupiah(
+        priceKey3Month
+      )} (2 Script Premium • 90 hari)`
+    );
+  }
+
+  if (!disable6MonthInDropdown) {
+    availableLines.push(
+      `🗓️ Key 6 Bulan – Rp ${formatRupiah(
+        priceKey6Month
+      )} (2 Script Premium • 180 hari)`
+    );
+  }
+
+  if (!disableLifetimeInDropdown) {
+    availableLines.push(
       `🔥 Key Lifetime – Rp ${formatRupiah(
         priceKeyLifetime
-      )} (Akses 1 Script • 1 tahun)`
+      )} (2 Script Premium • 1 tahun)`
     );
   }
 
-  // Emotes Key 3 Bulan (dropdown baru)
-  if (isEmote3MonthEnabled) {
-    lines.push(
-      `🎭 Emotes Key 3 Bulan – Rp ${formatRupiah(
-        priceKey3Month
-      )} (Akses emote premium • 90 hari)`
-    );
-  }
-
-  // Emotes Key 6 Bulan (dropdown baru)
-  if (isEmote6MonthEnabled) {
-    lines.push(
-      `🎭 Emotes Key 6 Bulan – Rp ${formatRupiah(
-        priceKey6Month
-      )} (Akses emote premium • 180 hari)`
-    );
-  }
-
-  // Indo Hangout tetap
-  lines.push(
+  availableLines.push(
     `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
       priceIndoHangout
     )} (1 Username • Permanent)`
   );
 
-  lines.push(
+  const desc = [
+    `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
+    '',
+    '**Paket Tersedia**',
+    ...availableLines,
     '',
     '**Langkah Selanjutnya**',
     '1. Pilih paket dari dropdown list menu di bawah.',
@@ -1792,34 +1796,49 @@ async function sendTicketIntroMessage(channel, user) {
     '3. Upload bukti bayar (screenshot QRIS) di channel ini.',
     '4. Tunggu konfirmasi admin ✅',
     '',
-    '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.'
-  );
-
-  const desc = lines.join('\n');
+    '⚠️ Jika button tidak muncul, kirim pesan apa saja di channel ini untuk refresh.',
+  ].join('\n');
 
   const embed = new EmbedBuilder()
     .setTitle('✨ Ticket Order Paid Key ✨')
     .setDescription(desc)
     .setColor(0xfee75c);
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('ticket_select_package')
-    .setPlaceholder('📦 Silahkan pilih orderan Anda');
+  // build opsi dropdown secara dinamis
+  const options = [
+    {
+      label: 'Key Sebulan',
+      description: `Rp ${formatRupiah(
+        priceKeyMonth
+      )} • 2 Script Premium (30 hari)`,
+      value: 'KEY_MONTH',
+      emoji: '⚡',
+    },
+  ];
 
-  const options = [];
+  if (!disable3MonthInDropdown) {
+    options.push({
+      label: 'Key 3 Bulan',
+      description: `Rp ${formatRupiah(
+        priceKey3Month
+      )} • 2 Script Premium (90 hari)`,
+      value: 'KEY_3MONTH',
+      emoji: '📆',
+    });
+  }
 
-  // Key Sebulan
-  options.push({
-    label: 'Key Sebulan',
-    description: `Rp ${formatRupiah(
-      priceKeyMonth
-    )} • 2 Script Premium (30 hari)`,
-    value: 'KEY_MONTH',
-    emoji: '⚡',
-  });
+  if (!disable6MonthInDropdown) {
+    options.push({
+      label: 'Key 6 Bulan',
+      description: `Rp ${formatRupiah(
+        priceKey6Month
+      )} • 2 Script Premium (180 hari)`,
+      value: 'KEY_6MONTH',
+      emoji: '🗓️',
+    });
+  }
 
-  // Key Lifetime jika enabled
-  if (isLifetimeEnabled) {
+  if (!disableLifetimeInDropdown) {
     options.push({
       label: 'Key Lifetime',
       description: `Rp ${formatRupiah(
@@ -1830,31 +1849,6 @@ async function sendTicketIntroMessage(channel, user) {
     });
   }
 
-  // Emotes Key 3 Bulan jika enabled
-  if (isEmote3MonthEnabled) {
-    options.push({
-      label: 'Emotes Key 3 Bulan',
-      description: `Rp ${formatRupiah(
-        priceKey3Month
-      )} • Akses emote premium (90 hari)`,
-      value: 'EMOTE_3M',
-      emoji: '🎭',
-    });
-  }
-
-  // Emotes Key 6 Bulan jika enabled
-  if (isEmote6MonthEnabled) {
-    options.push({
-      label: 'Emotes Key 6 Bulan',
-      description: `Rp ${formatRupiah(
-        priceKey6Month
-      )} • Akses emote premium (180 hari)`,
-      value: 'EMOTE_6M',
-      emoji: '🎭',
-    });
-  }
-
-  // Indo Hangout tetap selalu ada
   options.push({
     label: 'Indo Hangout Premium',
     description: `Rp ${formatRupiah(
@@ -1864,7 +1858,10 @@ async function sendTicketIntroMessage(channel, user) {
     emoji: '🇮🇩',
   });
 
-  select.addOptions(options);
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_select_package')
+    .setPlaceholder('📦 Silahkan pilih orderan Anda')
+    .addOptions(...options);
 
   const rowSelect = new ActionRowBuilder().addComponents(select);
 
@@ -2009,6 +2006,41 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
           flags: MessageFlags.Ephemeral,
         });
+            } else if (commandName === 'disablepricelifetime') {
+        if (!(await ensureOwner())) return;
+        const disabled = interaction.options.getBoolean('disabled', true);
+        disableLifetimeInDropdown = disabled;
+
+        await interaction.reply({
+          content: disabled
+            ? 'Paket **Key Lifetime** sekarang disembunyikan dari dropdown ticket.'
+            : 'Paket **Key Lifetime** sekarang ditampilkan kembali di dropdown ticket.',
+          flags: MessageFlags.Ephemeral,
+        });
+
+      } else if (commandName === 'disableprice3month') {
+        if (!(await ensureOwner())) return;
+        const disabled = interaction.options.getBoolean('disabled', true);
+        disable3MonthInDropdown = disabled;
+
+        await interaction.reply({
+          content: disabled
+            ? 'Paket **Key 3 Bulan** sekarang disembunyikan dari dropdown ticket.'
+            : 'Paket **Key 3 Bulan** sekarang ditampilkan kembali di dropdown ticket.',
+          flags: MessageFlags.Ephemeral,
+        });
+
+      } else if (commandName === 'disableprice6month') {
+        if (!(await ensureOwner())) return;
+        const disabled = interaction.options.getBoolean('disabled', true);
+        disable6MonthInDropdown = disabled;
+
+        await interaction.reply({
+          content: disabled
+            ? 'Paket **Key 6 Bulan** sekarang disembunyikan dari dropdown ticket.'
+            : 'Paket **Key 6 Bulan** sekarang ditampilkan kembali di dropdown ticket.',
+          flags: MessageFlags.Ephemeral,
+        });
       } else if (commandName === 'setharga_lifetime') {
         if (!(await ensureOwner())) return;
         const harga = interaction.options.getInteger('harga', true);
@@ -2029,34 +2061,6 @@ client.on('interactionCreate', async (interaction) => {
           )}.`,
           flags: MessageFlags.Ephemeral,
         });
-
-      // TOGGLE ENABLE/DISABLE PAKET LIFETIME
-      } else if (commandName === 'disablepricelifetime') {
-        if (!(await ensureOwner())) return;
-        isLifetimeEnabled = !isLifetimeEnabled;
-        await interaction.reply({
-          content: `Paket **Key Lifetime** sekarang: **${isLifetimeEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
-          flags: MessageFlags.Ephemeral,
-        });
-
-      // TOGGLE ENABLE/DISABLE EMOTES 3 BULAN
-      } else if (commandName === 'disableprice3month') {
-        if (!(await ensureOwner())) return;
-        isEmote3MonthEnabled = !isEmote3MonthEnabled;
-        await interaction.reply({
-          content: `Paket **Emotes Key 3 Bulan** sekarang: **${isEmote3MonthEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
-          flags: MessageFlags.Ephemeral,
-        });
-
-      // TOGGLE ENABLE/DISABLE EMOTES 6 BULAN
-      } else if (commandName === 'disableprice6month') {
-        if (!(await ensureOwner())) return;
-        isEmote6MonthEnabled = !isEmote6MonthEnabled;
-        await interaction.reply({
-          content: `Paket **Emotes Key 6 Bulan** sekarang: **${isEmote6MonthEnabled ? 'AKTIF (muncul di dropdown)' : 'NONAKTIF (disembunyikan dari dropdown)'}**.`,
-          flags: MessageFlags.Ephemeral,
-        });
-
       } else if (commandName === 'generatekeysebulan') {
         if (!(await ensureOwner())) return;
         const target = interaction.options.getUser('member', false);
@@ -2847,7 +2851,6 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
           const info = await fetchUserKeyInfo(interaction.user);
-          const activePaid =
           const activePaid = info.paidKeys.filter(
             (k) => k.status === 'Active'
           );
@@ -3163,31 +3166,42 @@ client.on('interactionCreate', async (interaction) => {
         let paymentNote = null;
 
         if (order && order.type === 'KEY_MONTH') {
-          paidLabel = 'Key Sebulan';
-          nominal = priceKeyMonth;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
-        } else if (order && order.type === 'KEY_LIFE') {
-          paidLabel = 'Key Lifetime';
-          nominal = priceKeyLifetime;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 365 * 24 * 60 * 60 * 1000;
-        } else if (order && order.type === 'INDO_VIP') {
-          paidLabel = 'Indo Hangout Premium';
-          nominal = priceIndoHangout;
-        } else if (order && order.type === 'BOOST_1M') {
-          paidLabel = 'Key 1 Month (Server Booster)';
-          nominal = 0;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
-          paymentNote = '3x Server Booster (30 days)';
-        } else if (order && order.type === 'BOOST_3M') {
-          paidLabel = 'Key 3 Months (Server Booster)';
-          nominal = 0;
-          const createdAt = order.timestamp || Date.now();
-          expiresMs = createdAt + 90 * 24 * 60 * 60 * 1000;
-          paymentNote = '5x Server Booster (90 days)';
-        }
+  paidLabel = 'Key Sebulan';
+  nominal = priceKeyMonth;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
+} else if (order && order.type === 'KEY_3MONTH') {
+  paidLabel = 'Key 3 Bulan';
+  nominal = priceKey3Month;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 90 * 24 * 60 * 60 * 1000;
+} else if (order && order.type === 'KEY_6MONTH') {
+  paidLabel = 'Key 6 Bulan';
+  nominal = priceKey6Month;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 180 * 24 * 60 * 60 * 1000;
+} else if (order && order.type === 'KEY_LIFE') {
+  paidLabel = 'Key Lifetime';
+  nominal = priceKeyLifetime;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 365 * 24 * 60 * 60 * 1000;
+} else if (order && order.type === 'INDO_VIP') {
+  paidLabel = 'Indo Hangout Premium';
+  nominal = priceIndoHangout;
+} else if (order && order.type === 'BOOST_1M') {
+  paidLabel = 'Key 1 Month (Server Booster)';
+  nominal = 0;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 30 * 24 * 60 * 60 * 1000;
+  paymentNote = '3x Server Booster (30 days)';
+} else if (order && order.type === 'BOOST_3M') {
+  paidLabel = 'Key 3 Months (Server Booster)';
+  nominal = 0;
+  const createdAt = order.timestamp || Date.now();
+  expiresMs = createdAt + 90 * 24 * 60 * 60 * 1000;
+  paymentNote = '5x Server Booster (90 days)';
+}
+
 
         let expiredText = '-';
         if (expiresMs) {
@@ -3436,128 +3450,224 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       if (customId === 'ticket_select_package') {
-        const [value] = interaction.values;
-        const ownerId = getTicketOwnerId(interaction.channel);
+  const [value] = interaction.values;
+  const ownerId = getTicketOwnerId(interaction.channel);
 
-        if (
-          interaction.user.id !== ownerId &&
-          !isOwner(interaction.user.id)
-        ) {
-          await interaction.reply({
-            content:
-              'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
+  if (
+    interaction.user.id !== ownerId &&
+    !isOwner(interaction.user.id)
+  ) {
+    await interaction.reply({
+      content:
+        'Hanya pembuat ticket yang dapat memilih paket order di ticket ini.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // KEY SEBULAN
+  if (value === 'KEY_MONTH') {
+    const harga = priceKeyMonth;
+    ticketOrders.set(interaction.channel.id, {
+      type: 'KEY_MONTH',
+      price: harga,
+      timestamp: Date.now(),
+    });
+
+    const instruksi = new EmbedBuilder()
+      .setTitle('✨ Instruksi Pembayaran — Key Sebulan')
+      .setDescription('Scan QRIS di bawah untuk membayar')
+      .addFields(
+        {
+          name: 'Detail Pesanan',
+          value:
+            `Paket   : Key Sebulan\n` +
+            `Nominal : Rp ${formatRupiah(harga)}`,
+        },
+        {
+          name: 'Langkah Pembayaran',
+          value:
+            '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+            '2. Bayar sesuai nominal.\n' +
+            '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+        },
+        {
+          name: 'Jam Operasional',
+          value: '08:00 - 23:00 WIB',
         }
+      )
+      .setColor(0xfee75c);
 
-        if (value === 'KEY_MONTH') {
-          const harga = priceKeyMonth;
-          ticketOrders.set(interaction.channel.id, {
-            type: 'KEY_MONTH',
-            price: harga,
-            timestamp: Date.now(),
-          });
+    if (QRIS_IMAGE_URL) {
+      instruksi.setImage(QRIS_IMAGE_URL);
+    }
 
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Instruksi Pembayaran — Key Sebulan')
-            .setDescription('Scan QRIS di bawah untuk membayar')
-            .addFields(
-              {
-                name: 'Detail Pesanan',
-                value:
-                  `Paket   : Key Sebulan\n` +
-                  `Nominal : Rp ${formatRupiah(harga)}`,
-              },
-              {
-                name: 'Langkah Pembayaran',
-                value:
-                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
-                  '2. Bayar sesuai nominal.\n' +
-                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
-              },
-              {
-                name: 'Jam Operasional',
-                value: '08:00 - 23:00 WIB',
-              }
-            )
-            .setColor(0xfee75c);
+    await interaction.reply({
+      content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+      embeds: [instruksi],
+    });
+  }
 
-          if (QRIS_IMAGE_URL) {
-            instruksi.setImage(QRIS_IMAGE_URL);
-          }
+  // KEY 3 BULAN
+  else if (value === 'KEY_3MONTH') {
+    const harga = priceKey3Month;
+    ticketOrders.set(interaction.channel.id, {
+      type: 'KEY_3MONTH',
+      price: harga,
+      timestamp: Date.now(),
+    });
 
-          await interaction.reply({
-            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
-            embeds: [instruksi],
-          });
-        } else if (value === 'KEY_LIFE') {
-          const harga = priceKeyLifetime;
-          ticketOrders.set(interaction.channel.id, {
-            type: 'KEY_LIFE',
-            price: harga,
-            timestamp: Date.now(),
-          });
-
-          const instruksi = new EmbedBuilder()
-            .setTitle('✨ Instruksi Pembayaran — Key Lifetime')
-            .setDescription('Scan QRIS di bawah untuk membayar')
-            .addFields(
-              {
-                name: 'Detail Pesanan',
-                value:
-                  `Paket   : Key Lifetime\n` +
-                  `Nominal : Rp ${formatRupiah(harga)}`,
-              },
-              {
-                name: 'Langkah Pembayaran',
-                value:
-                  '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
-                  '2. Bayar sesuai nominal.\n' +
-                  '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                  '4. Tunggu konfirmasi admin (maksimal 10 menit).',
-              },
-              {
-                name: 'Jam Operasional',
-                value: '08:00 - 23:00 WIB',
-              }
-            )
-            .setColor(0xfee75c);
-
-          if (QRIS_IMAGE_URL) {
-            instruksi.setImage(QRIS_IMAGE_URL);
-          }
-
-          await interaction.reply({
-            content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
-            embeds: [instruksi],
-          });
-        } else if (value === 'INDO_VIP') {
-          ticketOrders.set(interaction.channel.id, {
-            type: 'INDO_VIP',
-            price: priceIndoHangout,
-            timestamp: Date.now(),
-          });
-
-          const modal = new ModalBuilder()
-            .setCustomId('modal_roblox_username')
-            .setTitle('Masukkan Username Roblox');
-
-          const input = new TextInputBuilder()
-            .setCustomId('field_roblox_username')
-            .setLabel('Username Roblox')
-            .setPlaceholder('Contoh: BloxGuy123')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-          const row = new ActionRowBuilder().addComponents(input);
-          modal.addComponents(row);
-          await interaction.showModal(modal);
+    const instruksi = new EmbedBuilder()
+      .setTitle('✨ Instruksi Pembayaran — Key 3 Bulan')
+      .setDescription('Scan QRIS di bawah untuk membayar')
+      .addFields(
+        {
+          name: 'Detail Pesanan',
+          value:
+            `Paket   : Key 3 Bulan\n` +
+            `Nominal : Rp ${formatRupiah(harga)}`,
+        },
+        {
+          name: 'Langkah Pembayaran',
+          value:
+            '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+            '2. Bayar sesuai nominal.\n' +
+            '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+        },
+        {
+          name: 'Jam Operasional',
+          value: '08:00 - 23:00 WIB',
         }
+      )
+      .setColor(0xfee75c);
 
-        return;
-      }
+    if (QRIS_IMAGE_URL) {
+      instruksi.setImage(QRIS_IMAGE_URL);
+    }
+
+    await interaction.reply({
+      content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+      embeds: [instruksi],
+    });
+  }
+
+  // KEY 6 BULAN
+  else if (value === 'KEY_6MONTH') {
+    const harga = priceKey6Month;
+    ticketOrders.set(interaction.channel.id, {
+      type: 'KEY_6MONTH',
+      price: harga,
+      timestamp: Date.now(),
+    });
+
+    const instruksi = new EmbedBuilder()
+      .setTitle('✨ Instruksi Pembayaran — Key 6 Bulan')
+      .setDescription('Scan QRIS di bawah untuk membayar')
+      .addFields(
+        {
+          name: 'Detail Pesanan',
+          value:
+            `Paket   : Key 6 Bulan\n` +
+            `Nominal : Rp ${formatRupiah(harga)}`,
+        },
+        {
+          name: 'Langkah Pembayaran',
+          value:
+            '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+            '2. Bayar sesuai nominal.\n' +
+            '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+        },
+        {
+          name: 'Jam Operasional',
+          value: '08:00 - 23:00 WIB',
+        }
+      )
+      .setColor(0xfee75c);
+
+    if (QRIS_IMAGE_URL) {
+      instruksi.setImage(QRIS_IMAGE_URL);
+    }
+
+    await interaction.reply({
+      content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+      embeds: [instruksi],
+    });
+  }
+
+  // KEY LIFETIME
+  else if (value === 'KEY_LIFE') {
+    const harga = priceKeyLifetime;
+    ticketOrders.set(interaction.channel.id, {
+      type: 'KEY_LIFE',
+      price: harga,
+      timestamp: Date.now(),
+    });
+
+    const instruksi = new EmbedBuilder()
+      .setTitle('✨ Instruksi Pembayaran — Key Lifetime')
+      .setDescription('Scan QRIS di bawah untuk membayar')
+      .addFields(
+        {
+          name: 'Detail Pesanan',
+          value:
+            `Paket   : Key Lifetime\n` +
+            `Nominal : Rp ${formatRupiah(harga)}`,
+        },
+        {
+          name: 'Langkah Pembayaran',
+          value:
+            '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
+            '2. Bayar sesuai nominal.\n' +
+            '3. Screenshot bukti bayar dan upload di channel ini.\n' +
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+        },
+        {
+          name: 'Jam Operasional',
+          value: '08:00 - 23:00 WIB',
+        }
+      )
+      .setColor(0xfee75c);
+
+    if (QRIS_IMAGE_URL) {
+      instruksi.setImage(QRIS_IMAGE_URL);
+    }
+
+    await interaction.reply({
+      content: `✅ Silahkan mengirim bukti pembayaran anda disini ${interaction.user}`,
+      embeds: [instruksi],
+    });
+  }
+
+  // INDO HANGOUT
+  else if (value === 'INDO_VIP') {
+    ticketOrders.set(interaction.channel.id, {
+      type: 'INDO_VIP',
+      price: priceIndoHangout,
+      timestamp: Date.now(),
+    });
+
+    const modal = new ModalBuilder()
+      .setCustomId('modal_roblox_username')
+      .setTitle('Masukkan Username Roblox');
+
+    const input = new TextInputBuilder()
+      .setCustomId('field_roblox_username')
+      .setLabel('Username Roblox')
+      .setPlaceholder('Contoh: BloxGuy123')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const row = new ActionRowBuilder().addComponents(input);
+    modal.addComponents(row);
+    await interaction.showModal(modal);
+  }
+
+  return;
+}
+
 
       // PILIH PAKET SERVER BOOSTER
       if (customId === 'ticket_select_boost_package') {
@@ -3984,6 +4094,45 @@ const commands = [
       opt
         .setName('harga')
         .setDescription('Harga dalam Rupiah (misal: 10000)')
+        .setRequired(true)
+    ),
+    new SlashCommandBuilder()
+    .setName('setharga_indohangout')
+    .setDescription('Ubah harga paket Indo Hangout Premium')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 10000)')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('disablepricelifetime')
+    .setDescription('Aktifkan / nonaktifkan paket Key Lifetime di dropdown ticket')
+    .addBooleanOption((opt) =>
+      opt
+        .setName('disabled')
+        .setDescription('true = sembunyikan, false = tampilkan')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('disableprice3month')
+    .setDescription('Aktifkan / nonaktifkan paket Key 3 Bulan di dropdown ticket')
+    .addBooleanOption((opt) =>
+      opt
+        .setName('disabled')
+        .setDescription('true = sembunyikan, false = tampilkan')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('disableprice6month')
+    .setDescription('Aktifkan / nonaktifkan paket Key 6 Bulan di dropdown ticket')
+    .addBooleanOption((opt) =>
+      opt
+        .setName('disabled')
+        .setDescription('true = sembunyikan, false = tampilkan')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
