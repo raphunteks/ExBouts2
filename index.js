@@ -3226,7 +3226,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         const content =
-          '**✅️ Success Order Key 🔑**\n' +
+          '**✅️ Sukses Order Key 🔑**\n' +
           `User: ${ownerMention}\n` +
           `Paid Key: ${paidLabel}\n` +
           `Expired: ${expiredText}\n` +
@@ -3234,7 +3234,7 @@ client.on('interactionCreate', async (interaction) => {
 
         // BIKIN EMBED KUNING DARI CONTENT DI ATAS
         const paidLogEmbed = new EmbedBuilder()
-          .setTitle('✅️ Success Order Key 🔑')
+          .setTitle('✅️ Sukses Order Key 🔑')
           .setDescription(
             `User: ${ownerMention}\n` +
             `Paid Key: ${paidLabel}\n` +
@@ -3267,13 +3267,12 @@ client.on('interactionCreate', async (interaction) => {
           embeds: [paidLogEmbed],
           // content: ownerMention, // kalau mau ping user di log
         });
-
         await interaction.reply({
           content: '✅ Order berhasil dikonfirmasi dan log telah dikirim.',
           flags: MessageFlags.Ephemeral,
         });
-
         return;
+        }
 
       if (customId === 'ticket_close') {
         const member = await interaction.guild.members.fetch(
