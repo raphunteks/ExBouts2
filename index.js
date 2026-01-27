@@ -1667,9 +1667,9 @@ async function sendControlPanel(channel, guild) {
  */
 async function sendTicketPaymentMethodIntro(channel, user) {
   const desc = [
-    `Halo ${user}, terima kasih telah membuat ticket order paid key.`,
+    `Halo ${user}, thank you for creating a paid key ticket order.`,
     '',
-    '**Pilih Metode Pembayaran**',
+    '**Select Payment Methods**',
     '🇮🇩 **Order Paid Key ID (Rupiah)** — Pembayaran via QRIS (transfer Rupiah).',
     '🚀 **Order Paid Key EN (Server Booster)** — Payment using Nitro Server Boost.',
     '',
@@ -3075,7 +3075,7 @@ client.on('interactionCreate', async (interaction) => {
         ticketOwners.set(channel.id, interaction.user.id);
 
         await interaction.editReply({
-          content: `Ticket kamu sudah dibuat: ${channel}`,
+          content: `Your ticket has been created: ${channel}`,
         });
 
         // PERUBAHAN: setelah ticket dibuat, kirim panel PILIH METODE PEMBAYARAN
@@ -3226,11 +3226,22 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         const content =
-          '**✅️ Sukses Order Key 🔑**\n' +
+          '**✅️ Success Order Key 🔑**\n' +
           `User: ${ownerMention}\n` +
           `Paid Key: ${paidLabel}\n` +
           `Expired: ${expiredText}\n` +
           `Nominal: ${nominalText}`;
+
+        // BIKIN EMBED KUNING DARI CONTENT DI ATAS
+        const paidLogEmbed = new EmbedBuilder()
+          .setTitle('✅️ Success Order Key 🔑')
+          .setDescription(
+            `User: ${ownerMention}\n` +
+            `Paid Key: ${paidLabel}\n` +
+            `Expired: ${expiredText}\n` +
+            `Nominal: ${nominalText}`
+          )
+          .setColor(0xfee75c); // KUNING
 
         if (!LOGPAID_CHANNEL_ID) {
           await interaction.reply({
@@ -3251,7 +3262,11 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        await logPaidOrder(guild, { content });
+        // KIRIM EMBED (bisa tambah content untuk mention user kalau mau)
+        await logPaidOrder(guild, {
+          embeds: [paidLogEmbed],
+          // content: ownerMention, // kalau mau ping user di log
+        });
 
         await interaction.reply({
           content: '✅ Order berhasil dikonfirmasi dan log telah dikirim.',
@@ -3259,7 +3274,6 @@ client.on('interactionCreate', async (interaction) => {
         });
 
         return;
-      }
 
       if (customId === 'ticket_close') {
         const member = await interaction.guild.members.fetch(
