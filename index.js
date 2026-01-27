@@ -109,6 +109,8 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 let disableLifetimeInDropdown = false;
 let disable3MonthInDropdown = false;
 let disable6MonthInDropdown = false;
+let disableIndoHangout =
+  String(process.env.DISABLE_INDO_HANGOUT || '').toLowerCase() === 'true';
 
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
@@ -1734,13 +1736,6 @@ async function sendTicketPaymentMethodIntro(channel, user) {
 
 /**
  * PANEL LAMA: Rupiah (QRIS) – tetap dipakai untuk jalur IDR
- * Sekarang support:
- * - Key Sebulan
- * - Key 3 Bulan (opsional)
- * - Key 6 Bulan (opsional)
- * - Key Lifetime (opsional)
- * - Indo Hangout Premium
- *
  * Lifetime / 3 Bulan / 6 Bulan bisa di-hide runtime via command:
  * /disablepricelifetime, /disableprice3month, /disableprice6month
  */
@@ -1778,11 +1773,13 @@ async function sendTicketIntroMessage(channel, user) {
     );
   }
 
-  availableLines.push(
-    `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
-      priceIndoHangout
-    )} (1 Username • Permanent)`
-  );
+  if (!disableIndoHangout) {
+    availableLines.push(
+      `🇮🇩 Indo Hangout Premium – Rp ${formatRupiah(
+        priceIndoHangout
+      )} (1 Username • Permanent)`
+    );
+  }
 
   const desc = [
     `Halo ${user}, terima kasih telah membuat ticket order VIP.`,
@@ -1849,14 +1846,16 @@ async function sendTicketIntroMessage(channel, user) {
     });
   }
 
-  options.push({
-    label: 'Indo Hangout Premium',
-    description: `Rp ${formatRupiah(
-      priceIndoHangout
-    )} • 1 Username (Permanent)`,
-    value: 'INDO_VIP',
-    emoji: '🇮🇩',
-  });
+  if (!disableIndoHangout) {
+    options.push({
+      label: 'Indo Hangout Premium',
+      description: `Rp ${formatRupiah(
+        priceIndoHangout
+      )} • 1 Username (Permanent)`,
+      value: 'INDO_VIP',
+      emoji: '🇮🇩',
+    });
+  }
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('ticket_select_package')
@@ -2041,6 +2040,18 @@ client.on('interactionCreate', async (interaction) => {
             : 'Paket **Key 6 Bulan** sekarang ditampilkan kembali di dropdown ticket.',
           flags: MessageFlags.Ephemeral,
         });
+      } else if (commandName === 'disableindohangout') {
+        if (!(await ensureOwner())) return;
+        const disabled = interaction.options.getBoolean('disabled', true);
+        disableIndoHangout = disabled;
+
+        await interaction.reply({
+          content: disabled
+            ? 'Paket **Indo Hangout Premium** sekarang disembunyikan dari dropdown ticket.'
+            : 'Paket **Indo Hangout Premium** sekarang ditampilkan kembali di dropdown ticket.',
+          flags: MessageFlags.Ephemeral,
+        });
+
       } else if (commandName === 'setharga_lifetime') {
         if (!(await ensureOwner())) return;
         const harga = interaction.options.getInteger('harga', true);
@@ -3653,9 +3664,17 @@ client.on('interactionCreate', async (interaction) => {
       embeds: [instruksi],
     });
   }
-
   // INDO HANGOUT
   else if (value === 'INDO_VIP') {
+    if (disableIndoHangout) {
+      await interaction.reply({
+        content:
+          'Paket **Indo Hangout Premium** sedang dinonaktifkan oleh admin. Silakan pilih paket lain.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     ticketOrders.set(interaction.channel.id, {
       type: 'INDO_VIP',
       price: priceIndoHangout,
@@ -3680,8 +3699,6 @@ client.on('interactionCreate', async (interaction) => {
 
   return;
 }
-
-
       // PILIH PAKET SERVER BOOSTER
       if (customId === 'ticket_select_boost_package') {
         const [value] = interaction.values;
@@ -4138,6 +4155,15 @@ const commands = [
   new SlashCommandBuilder()
     .setName('disableprice6month')
     .setDescription('Aktifkan / nonaktifkan paket Key 6 Bulan di dropdown ticket')
+    .addBooleanOption((opt) =>
+      opt
+        .setName('disabled')
+        .setDescription('true = sembunyikan, false = tampilkan')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('disableindohangout')
+    .setDescription('Aktifkan / nonaktifkan paket Indo Hangout Premium di dropdown ticket')
     .addBooleanOption((opt) =>
       opt
         .setName('disabled')
