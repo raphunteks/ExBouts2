@@ -2086,6 +2086,14 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key 3 Bulan** di-set ke Rp ${formatRupiah(harga)}.`,
           flags: MessageFlags.Ephemeral,
         });
+      } else if (commandName === 'setharga_6bulan') {
+        if (!(await ensureOwner())) return;
+        const harga = interaction.options.getInteger('harga', true);
+        priceKey6Month = harga;
+        await interaction.reply({
+          content: `Harga **Key 6 Bulan** di-set ke Rp ${formatRupiah(harga)}.`,
+          flags: MessageFlags.Ephemeral,
+        });
       } else if (commandName === 'disablepricelifetime') {
         if (!(await ensureOwner())) return;
         const disabled = interaction.options.getBoolean('disabled', true);
@@ -4190,7 +4198,24 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 15000)')
         .setRequired(true)
     ),
-
+  new SlashCommandBuilder()
+    .setName('setharga_3bulan')
+    .setDescription('Ubah harga paket Key 3 Bulan')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 40000)')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('setharga_6bulan')
+    .setDescription('Ubah harga paket Key 6 Bulan')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('harga')
+        .setDescription('Harga dalam Rupiah (misal: 70000)')
+        .setRequired(true)
+    ),
   new SlashCommandBuilder()
     .setName('setharga_lifetime')
     .setDescription('Ubah harga paket Key Lifetime')
