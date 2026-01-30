@@ -95,9 +95,23 @@ const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
+/**
+ * REACTION ROLE CONFIG:
+ * - DEFAULT (read-only)  : __dirname/configrole.json  -> seed bawaan repo
+ * - RUNTIME (writable)   : {REACTION_ROLE_CONFIG_DIR}/configrole.json
+ *   - REACTION_ROLE_CONFIG_DIR bisa dipasang ke Railway Volume, contoh: /data
+ *   - Kalau env REACTION_ROLE_CONFIG_PATH di-set, akan dipakai sebagai path runtime langsung.
+ */
+const REACTION_ROLE_CONFIG_DIR =
+  process.env.REACTION_ROLE_CONFIG_DIR ||
+  process.env.DATA_DIR || // opsional: bisa pakai DATA_DIR juga kalau mau
+  path.join(process.cwd(), 'data');
+
 const REACTION_ROLE_CONFIG_PATH =
   process.env.REACTION_ROLE_CONFIG_PATH ||
-  path.join(__dirname, 'configrole.json');
+  path.join(REACTION_ROLE_CONFIG_DIR, 'configrole.json');
+
+const REACTION_ROLE_DEFAULT_PATH = path.join(__dirname, 'configrole.json');
 
 let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
 let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 40000);
@@ -115,8 +129,104 @@ let disableIndoHangout =
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
 const reactionRoles = new Map();
+
+/**
+ * LOAD CONFIG REACTION ROLE:
+ * 1. Kalau runtime config (REACTION_ROLE_CONFIG_PATH) ada, pakai itu.
+ * 2. Kalau tidak ada, coba baca default config (REACTION_ROLE_DEFAULT_PATH) dari repo.
+ * 3. Kalau dua-duanya tidak ada / error, pakai {}.
+ */
+function loadReactionRoleConfig() {
+  try {
+    // 1. runtime config (writable, misalnya di volume Railway)
+    if (fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
+      const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
+      if (!raw.trim()) {
+        console.log(
+          '[ReactionRole] Runtime config kosong, menggunakan config kosong {}'
+        );
+        return {};
+      }
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') {
+        console.warn(
+          '[ReactionRole] Runtime config bukan object, fallback ke {}'
+        );
+        return {};
+      }
+      console.log(
+        `[ReactionRole] Loaded runtime config from ${REACTION_ROLE_CONFIG_PATH}`
+      );
+      return data;
+    }
+
+    // 2. fallback ke default bawaan repo (read-only)
+    if (fs.existsSync(REACTION_ROLE_DEFAULT_PATH)) {
+      const raw = fs.readFileSync(REACTION_ROLE_DEFAULT_PATH, 'utf8');
+      if (!raw.trim()) {
+        console.log(
+          '[ReactionRole] Default config kosong, menggunakan config kosong {}'
+        );
+        return {};
+      }
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') {
+        console.warn(
+          '[ReactionRole] Default config bukan object, fallback ke {}'
+        );
+        return {};
+      }
+      console.log(
+        `[ReactionRole] Loaded default config from ${REACTION_ROLE_DEFAULT_PATH}`
+      );
+      return data;
+    }
+
+    console.log(
+      '[ReactionRole] Tidak menemukan configrole.json (runtime maupun default), menggunakan config kosong {}'
+    );
+    return {};
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal load configrole.json (runtime/default), menggunakan config kosong:',
+      err
+    );
+    return {};
+  }
+}
+
+/**
+ * SAVE CONFIG REACTION ROLE:
+ * - Selalu save ke REACTION_ROLE_CONFIG_PATH (runtime).
+ * - Pastikan foldernya ada.
+ * - Ini yang akan dibaca lagi saat bot restart.
+ */
+function saveReactionRoleConfig(store) {
+  try {
+    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(
+      REACTION_ROLE_CONFIG_PATH,
+      JSON.stringify(store, null, 2),
+      'utf8'
+    );
+    console.log(
+      `[ReactionRole] Saved runtime config to ${REACTION_ROLE_CONFIG_PATH}`
+    );
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal menyimpan configrole.json (runtime):',
+      err
+    );
+  }
+}
+
+// load config pertama kali saat start
 let reactionRoleStore = loadReactionRoleConfig();
 
+// isi Map reactionRoles dari store
 for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
   if (!Array.isArray(conf) || !conf.length) continue;
   const normalized = conf
@@ -139,46 +249,8 @@ for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
 }
 
 console.log(
-  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
+  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from config store`
 );
-
-function loadReactionRoleConfig() {
-  try {
-    if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
-      return {};
-    }
-    const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
-    if (!raw.trim()) return {};
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return {};
-    return data;
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal load configrole.json, menggunakan config kosong:',
-      err
-    );
-    return {};
-  }
-}
-
-function saveReactionRoleConfig(store) {
-  try {
-    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(
-      REACTION_ROLE_CONFIG_PATH,
-      JSON.stringify(store, null, 2),
-      'utf8'
-    );
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal menyimpan configrole.json:',
-      err
-    );
-  }
-}
 
 function isOwner(userId) {
   return OWNER_IDS.includes(String(userId));
@@ -919,6 +991,7 @@ async function logPaidOrder(guild, options) {
     console.error('Failed to send paid order log:', err);
   }
 }
+
 
 async function generateWelcomeCard(member) {
   const width = 1262;
@@ -2005,11 +2078,18 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
           flags: MessageFlags.Ephemeral,
         });
-            } else if (commandName === 'disablepricelifetime') {
+      } else if (commandName === 'setharga_3bulan') {
+        if (!(await ensureOwner())) return;
+        const harga = interaction.options.getInteger('harga', true);
+        priceKey3Month = harga;
+        await interaction.reply({
+          content: `Harga **Key 3 Bulan** di-set ke Rp ${formatRupiah(harga)}.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      } else if (commandName === 'disablepricelifetime') {
         if (!(await ensureOwner())) return;
         const disabled = interaction.options.getBoolean('disabled', true);
         disableLifetimeInDropdown = disabled;
-
         await interaction.reply({
           content: disabled
             ? 'Paket **Key Lifetime** sekarang disembunyikan dari dropdown ticket.'
