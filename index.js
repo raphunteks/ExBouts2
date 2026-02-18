@@ -123,8 +123,7 @@ let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 let disableLifetimeInDropdown = true;
 let disable3MonthInDropdown = false;
 let disable6MonthInDropdown = true;
-let disableIndoHangout =
-  String(process.env.DISABLE_INDO_HANGOUT || '').toLowerCase() === 'true';
+let disableIndoHangout = true;
 
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
