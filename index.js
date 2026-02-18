@@ -113,16 +113,16 @@ const REACTION_ROLE_CONFIG_PATH =
 
 const REACTION_ROLE_DEFAULT_PATH = path.join(__dirname, 'configrole.json');
 
-let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
-let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 40000);
+let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 35000);
+let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 55000);
 let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 70000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
 // flag runtime untuk hide/show paket di dropdown ticket
-let disableLifetimeInDropdown = false;
+let disableLifetimeInDropdown = true;
 let disable3MonthInDropdown = false;
-let disable6MonthInDropdown = false;
+let disable6MonthInDropdown = true;
 let disableIndoHangout =
   String(process.env.DISABLE_INDO_HANGOUT || '').toLowerCase() === 'true';
 
@@ -1819,14 +1819,14 @@ async function sendTicketIntroMessage(channel, user) {
   availableLines.push(
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (2 Script Premium • 30 hari)`
+    )} (5 Script Premium • 30 hari)`
   );
 
   if (!disable3MonthInDropdown) {
     availableLines.push(
       `📆 Key 3 Bulan – Rp ${formatRupiah(
         priceKey3Month
-      )} (2 Script Premium • 90 hari)`
+      )} (5 Script Premium • 90 hari)`
     );
   }
 
@@ -1834,7 +1834,7 @@ async function sendTicketIntroMessage(channel, user) {
     availableLines.push(
       `🗓️ Key 6 Bulan – Rp ${formatRupiah(
         priceKey6Month
-      )} (2 Script Premium • 180 hari)`
+      )} (5 Script Premium • 180 hari)`
     );
   }
 
@@ -1842,7 +1842,7 @@ async function sendTicketIntroMessage(channel, user) {
     availableLines.push(
       `🔥 Key Lifetime – Rp ${formatRupiah(
         priceKeyLifetime
-      )} (2 Script Premium • 1 tahun)`
+      )} (5 Script Premium • 1 tahun)`
     );
   }
 
@@ -1880,7 +1880,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key Sebulan',
       description: `Rp ${formatRupiah(
         priceKeyMonth
-      )} • 2 Script Premium (30 hari)`,
+      )} • 5 Script Premium (30 hari)`,
       value: 'KEY_MONTH',
       emoji: '⚡',
     },
@@ -1891,7 +1891,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key 3 Bulan',
       description: `Rp ${formatRupiah(
         priceKey3Month
-      )} • 2 Script Premium (90 hari)`,
+      )} • 5 Script Premium (90 hari)`,
       value: 'KEY_3MONTH',
       emoji: '📆',
     });
@@ -1902,7 +1902,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key 6 Bulan',
       description: `Rp ${formatRupiah(
         priceKey6Month
-      )} • 2 Script Premium (180 hari)`,
+      )} • 5 Script Premium (180 hari)`,
       value: 'KEY_6MONTH',
       emoji: '🗓️',
     });
@@ -1913,7 +1913,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key Lifetime',
       description: `Rp ${formatRupiah(
         priceKeyLifetime
-      )} • 2 Script Premium (1 tahun)`,
+      )} • 5 Script Premium (1 tahun)`,
       value: 'KEY_LIFE',
       emoji: '🔥',
     });
@@ -3485,7 +3485,7 @@ client.on('interactionCreate', async (interaction) => {
                 '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
                 '2. Bayar sesuai nominal.\n' +
                 '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+                '4. Tunggu konfirmasi admin (sampai Online).',
             },
             {
               name: 'Jam Operasional',
@@ -3602,7 +3602,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+            '4. Tunggu konfirmasi admin (sampai Online).',
         },
         {
           name: 'Jam Operasional',
@@ -3646,7 +3646,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+            '4. Tunggu konfirmasi admin (sampai Online).',
         },
         {
           name: 'Jam Operasional',
@@ -3690,7 +3690,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+            '4. Tunggu konfirmasi admin (sampai Online).',
         },
         {
           name: 'Jam Operasional',
@@ -3734,7 +3734,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
+            '4. Tunggu konfirmasi admin (sampai Online).',
         },
         {
           name: 'Jam Operasional',
