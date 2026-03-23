@@ -99,8 +99,8 @@ const REACTION_ROLE_CONFIG_PATH =
   process.env.REACTION_ROLE_CONFIG_PATH ||
   path.join(__dirname, 'configrole.json');
 
-let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
-let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 40000);
+let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 35000);
+let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 55000);
 let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 70000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
