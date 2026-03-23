@@ -95,137 +95,28 @@ const SERVER_STATS_MEMBERS_ID = process.env.SERVER_STATS_MEMBERS_ID || null;
 const SERVER_STATS_BOTS_ID = process.env.SERVER_STATS_BOTS_ID || null;
 const SERVER_STATS_BOOSTS_ID = process.env.SERVER_STATS_BOOSTS_ID || null;
 
-/**
- * REACTION ROLE CONFIG:
- * - DEFAULT (read-only)  : __dirname/configrole.json  -> seed bawaan repo
- * - RUNTIME (writable)   : {REACTION_ROLE_CONFIG_DIR}/configrole.json
- *   - REACTION_ROLE_CONFIG_DIR bisa dipasang ke Railway Volume, contoh: /data
- *   - Kalau env REACTION_ROLE_CONFIG_PATH di-set, akan dipakai sebagai path runtime langsung.
- */
-const REACTION_ROLE_CONFIG_DIR =
-  process.env.REACTION_ROLE_CONFIG_DIR ||
-  process.env.DATA_DIR || // opsional: bisa pakai DATA_DIR juga kalau mau
-  path.join(process.cwd(), 'data');
-
 const REACTION_ROLE_CONFIG_PATH =
   process.env.REACTION_ROLE_CONFIG_PATH ||
-  path.join(REACTION_ROLE_CONFIG_DIR, 'configrole.json');
+  path.join(__dirname, 'configrole.json');
 
-const REACTION_ROLE_DEFAULT_PATH = path.join(__dirname, 'configrole.json');
-
-let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 35000);
-let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 55000);
+let priceKeyMonth = Number(process.env.PRICE_KEY_MONTH || 15000);
+let priceKey3Month = Number(process.env.PRICE_KEY_3MONTH || 40000);
 let priceKey6Month = Number(process.env.PRICE_KEY_6MONTH || 70000);
 let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
 // flag runtime untuk hide/show paket di dropdown ticket
-let disableLifetimeInDropdown = true;
+let disableLifetimeInDropdown = false;
 let disable3MonthInDropdown = false;
-let disable6MonthInDropdown = true;
-let disableIndoHangout = true;
+let disable6MonthInDropdown = false;
+let disableIndoHangout =
+  String(process.env.DISABLE_INDO_HANGOUT || '').toLowerCase() === 'true';
 
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
 const reactionRoles = new Map();
-
-/**
- * LOAD CONFIG REACTION ROLE:
- * 1. Kalau runtime config (REACTION_ROLE_CONFIG_PATH) ada, pakai itu.
- * 2. Kalau tidak ada, coba baca default config (REACTION_ROLE_DEFAULT_PATH) dari repo.
- * 3. Kalau dua-duanya tidak ada / error, pakai {}.
- */
-function loadReactionRoleConfig() {
-  try {
-    // 1. runtime config (writable, misalnya di volume Railway)
-    if (fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
-      const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
-      if (!raw.trim()) {
-        console.log(
-          '[ReactionRole] Runtime config kosong, menggunakan config kosong {}'
-        );
-        return {};
-      }
-      const data = JSON.parse(raw);
-      if (!data || typeof data !== 'object') {
-        console.warn(
-          '[ReactionRole] Runtime config bukan object, fallback ke {}'
-        );
-        return {};
-      }
-      console.log(
-        `[ReactionRole] Loaded runtime config from ${REACTION_ROLE_CONFIG_PATH}`
-      );
-      return data;
-    }
-
-    // 2. fallback ke default bawaan repo (read-only)
-    if (fs.existsSync(REACTION_ROLE_DEFAULT_PATH)) {
-      const raw = fs.readFileSync(REACTION_ROLE_DEFAULT_PATH, 'utf8');
-      if (!raw.trim()) {
-        console.log(
-          '[ReactionRole] Default config kosong, menggunakan config kosong {}'
-        );
-        return {};
-      }
-      const data = JSON.parse(raw);
-      if (!data || typeof data !== 'object') {
-        console.warn(
-          '[ReactionRole] Default config bukan object, fallback ke {}'
-        );
-        return {};
-      }
-      console.log(
-        `[ReactionRole] Loaded default config from ${REACTION_ROLE_DEFAULT_PATH}`
-      );
-      return data;
-    }
-
-    console.log(
-      '[ReactionRole] Tidak menemukan configrole.json (runtime maupun default), menggunakan config kosong {}'
-    );
-    return {};
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal load configrole.json (runtime/default), menggunakan config kosong:',
-      err
-    );
-    return {};
-  }
-}
-
-/**
- * SAVE CONFIG REACTION ROLE:
- * - Selalu save ke REACTION_ROLE_CONFIG_PATH (runtime).
- * - Pastikan foldernya ada.
- * - Ini yang akan dibaca lagi saat bot restart.
- */
-function saveReactionRoleConfig(store) {
-  try {
-    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(
-      REACTION_ROLE_CONFIG_PATH,
-      JSON.stringify(store, null, 2),
-      'utf8'
-    );
-    console.log(
-      `[ReactionRole] Saved runtime config to ${REACTION_ROLE_CONFIG_PATH}`
-    );
-  } catch (err) {
-    console.error(
-      '[ReactionRole] Gagal menyimpan configrole.json (runtime):',
-      err
-    );
-  }
-}
-
-// load config pertama kali saat start
 let reactionRoleStore = loadReactionRoleConfig();
 
-// isi Map reactionRoles dari store
 for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
   if (!Array.isArray(conf) || !conf.length) continue;
   const normalized = conf
@@ -248,8 +139,46 @@ for (const [messageId, conf] of Object.entries(reactionRoleStore)) {
 }
 
 console.log(
-  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from config store`
+  `[ReactionRole] Loaded ${reactionRoles.size} reaction-role messages from configrole.json`
 );
+
+function loadReactionRoleConfig() {
+  try {
+    if (!fs.existsSync(REACTION_ROLE_CONFIG_PATH)) {
+      return {};
+    }
+    const raw = fs.readFileSync(REACTION_ROLE_CONFIG_PATH, 'utf8');
+    if (!raw.trim()) return {};
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return {};
+    return data;
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal load configrole.json, menggunakan config kosong:',
+      err
+    );
+    return {};
+  }
+}
+
+function saveReactionRoleConfig(store) {
+  try {
+    const dir = path.dirname(REACTION_ROLE_CONFIG_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(
+      REACTION_ROLE_CONFIG_PATH,
+      JSON.stringify(store, null, 2),
+      'utf8'
+    );
+  } catch (err) {
+    console.error(
+      '[ReactionRole] Gagal menyimpan configrole.json:',
+      err
+    );
+  }
+}
 
 function isOwner(userId) {
   return OWNER_IDS.includes(String(userId));
@@ -990,7 +919,6 @@ async function logPaidOrder(guild, options) {
     console.error('Failed to send paid order log:', err);
   }
 }
-
 
 async function generateWelcomeCard(member) {
   const width = 1262;
@@ -1818,14 +1746,14 @@ async function sendTicketIntroMessage(channel, user) {
   availableLines.push(
     `⚡ Key Sebulan – Rp ${formatRupiah(
       priceKeyMonth
-    )} (5 Script Premium • 30 hari)`
+    )} (2 Script Premium • 30 hari)`
   );
 
   if (!disable3MonthInDropdown) {
     availableLines.push(
       `📆 Key 3 Bulan – Rp ${formatRupiah(
         priceKey3Month
-      )} (5 Script Premium • 90 hari)`
+      )} (2 Script Premium • 90 hari)`
     );
   }
 
@@ -1833,7 +1761,7 @@ async function sendTicketIntroMessage(channel, user) {
     availableLines.push(
       `🗓️ Key 6 Bulan – Rp ${formatRupiah(
         priceKey6Month
-      )} (5 Script Premium • 180 hari)`
+      )} (2 Script Premium • 180 hari)`
     );
   }
 
@@ -1841,7 +1769,7 @@ async function sendTicketIntroMessage(channel, user) {
     availableLines.push(
       `🔥 Key Lifetime – Rp ${formatRupiah(
         priceKeyLifetime
-      )} (5 Script Premium • 1 tahun)`
+      )} (2 Script Premium • 1 tahun)`
     );
   }
 
@@ -1879,7 +1807,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key Sebulan',
       description: `Rp ${formatRupiah(
         priceKeyMonth
-      )} • 5 Script Premium (30 hari)`,
+      )} • 2 Script Premium (30 hari)`,
       value: 'KEY_MONTH',
       emoji: '⚡',
     },
@@ -1890,7 +1818,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key 3 Bulan',
       description: `Rp ${formatRupiah(
         priceKey3Month
-      )} • 5 Script Premium (90 hari)`,
+      )} • 2 Script Premium (90 hari)`,
       value: 'KEY_3MONTH',
       emoji: '📆',
     });
@@ -1901,7 +1829,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key 6 Bulan',
       description: `Rp ${formatRupiah(
         priceKey6Month
-      )} • 5 Script Premium (180 hari)`,
+      )} • 2 Script Premium (180 hari)`,
       value: 'KEY_6MONTH',
       emoji: '🗓️',
     });
@@ -1912,7 +1840,7 @@ async function sendTicketIntroMessage(channel, user) {
       label: 'Key Lifetime',
       description: `Rp ${formatRupiah(
         priceKeyLifetime
-      )} • 5 Script Premium (1 tahun)`,
+      )} • 2 Script Premium (1 tahun)`,
       value: 'KEY_LIFE',
       emoji: '🔥',
     });
@@ -2077,26 +2005,11 @@ client.on('interactionCreate', async (interaction) => {
           content: `Harga **Key Sebulan** di-set ke Rp ${formatRupiah(harga)}.`,
           flags: MessageFlags.Ephemeral,
         });
-      } else if (commandName === 'setharga_3bulan') {
-        if (!(await ensureOwner())) return;
-        const harga = interaction.options.getInteger('harga', true);
-        priceKey3Month = harga;
-        await interaction.reply({
-          content: `Harga **Key 3 Bulan** di-set ke Rp ${formatRupiah(harga)}.`,
-          flags: MessageFlags.Ephemeral,
-        });
-      } else if (commandName === 'setharga_6bulan') {
-        if (!(await ensureOwner())) return;
-        const harga = interaction.options.getInteger('harga', true);
-        priceKey6Month = harga;
-        await interaction.reply({
-          content: `Harga **Key 6 Bulan** di-set ke Rp ${formatRupiah(harga)}.`,
-          flags: MessageFlags.Ephemeral,
-        });
-      } else if (commandName === 'disablepricelifetime') {
+            } else if (commandName === 'disablepricelifetime') {
         if (!(await ensureOwner())) return;
         const disabled = interaction.options.getBoolean('disabled', true);
         disableLifetimeInDropdown = disabled;
+
         await interaction.reply({
           content: disabled
             ? 'Paket **Key Lifetime** sekarang disembunyikan dari dropdown ticket.'
@@ -3484,7 +3397,7 @@ client.on('interactionCreate', async (interaction) => {
                 '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
                 '2. Bayar sesuai nominal.\n' +
                 '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-                '4. Tunggu konfirmasi admin (sampai Online).',
+                '4. Tunggu konfirmasi admin (maksimal 10 menit).',
             },
             {
               name: 'Jam Operasional',
@@ -3601,7 +3514,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (sampai Online).',
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
         },
         {
           name: 'Jam Operasional',
@@ -3645,7 +3558,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (sampai Online).',
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
         },
         {
           name: 'Jam Operasional',
@@ -3689,7 +3602,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (sampai Online).',
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
         },
         {
           name: 'Jam Operasional',
@@ -3733,7 +3646,7 @@ client.on('interactionCreate', async (interaction) => {
             '1. Scan QRIS di bawah dengan aplikasi pembayaran.\n' +
             '2. Bayar sesuai nominal.\n' +
             '3. Screenshot bukti bayar dan upload di channel ini.\n' +
-            '4. Tunggu konfirmasi admin (sampai Online).',
+            '4. Tunggu konfirmasi admin (maksimal 10 menit).',
         },
         {
           name: 'Jam Operasional',
@@ -4197,24 +4110,7 @@ const commands = [
         .setDescription('Harga dalam Rupiah (misal: 15000)')
         .setRequired(true)
     ),
-  new SlashCommandBuilder()
-    .setName('setharga_3bulan')
-    .setDescription('Ubah harga paket Key 3 Bulan')
-    .addIntegerOption((opt) =>
-      opt
-        .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 40000)')
-        .setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName('setharga_6bulan')
-    .setDescription('Ubah harga paket Key 6 Bulan')
-    .addIntegerOption((opt) =>
-      opt
-        .setName('harga')
-        .setDescription('Harga dalam Rupiah (misal: 70000)')
-        .setRequired(true)
-    ),
+
   new SlashCommandBuilder()
     .setName('setharga_lifetime')
     .setDescription('Ubah harga paket Key Lifetime')
