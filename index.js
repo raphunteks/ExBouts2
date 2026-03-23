@@ -106,11 +106,10 @@ let priceKeyLifetime = Number(process.env.PRICE_KEY_LIFETIME || 25000);
 let priceIndoHangout = Number(process.env.PRICE_INDO_HANGOUT || 10000);
 
 // flag runtime untuk hide/show paket di dropdown ticket
-let disableLifetimeInDropdown = false;
+let disableLifetimeInDropdown = true;
 let disable3MonthInDropdown = false;
-let disable6MonthInDropdown = false;
-let disableIndoHangout =
-  String(process.env.DISABLE_INDO_HANGOUT || '').toLowerCase() === 'true';
+let disable6MonthInDropdown = true;
+let disableIndoHangout =true;
 
 const ticketOwners = new Map();
 const ticketOrders = new Map(); // channelId -> { type, price, timestamp }
