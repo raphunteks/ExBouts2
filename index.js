@@ -55,15 +55,15 @@ const ORDER_PAID_CHANNEL_ID = process.env.ORDER_PAID_CHANNEL_ID || null;
 
 const PAIDKEY_VALIDATE_BASE =
   process.env.PAIDKEY_VALIDATE_BASE ||
-  'https://exc-webs.vercel.app/api/paidkey/isValidate';
+  'https://exchubpaid.vercel.app/api/paidkey/isValidate';
 
 const PAIDKEY_CREATE_URL =
   process.env.PAIDKEY_CREATE_URL ||
-  'https://exc-webs.vercel.app/api/paidkey/createOrUpdate';
+  'https://exchubpaid.vercel.app/api/paidkey/createOrUpdate';
 
 const EXHUB_USERINFO_URL =
   process.env.EXHUB_USERINFO_URL ||
-  'https://exc-webs.vercel.app/api/paidfree/user-info';
+  'https://exchubpaid.vercel.app/api/paidfree/user-info';
 
 const RESET_HWID_API_URL =
   process.env.RESET_HWID_API_URL ||
@@ -2675,7 +2675,7 @@ client.on('interactionCreate', async (interaction) => {
 
       if (customId === 'control_get_script') {
         const scriptLine =
-          'loadstring(game:HttpGet("https://exc-webs.vercel.app/api/script/spear-fishing", true))()';
+          'loadstring(game:HttpGet("https://exchubpaid.vercel.app/api/script/spear-fishing", true))()';
 
         const msg =
           '**Desktop Executor**\n' +
